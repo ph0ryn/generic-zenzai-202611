@@ -6,7 +6,7 @@ Colab上で学習し、AJIMEE-Benchで変換精度を評価できる。
 ## Usage
 
 Colabで新規ノートブックを作る。
-ランタイムをGPUに変更し、以下の4ブロックを別々のセルにコピーして、
+ランタイムをGPUに変更し、以下の5ブロックを別々のセルにコピーして、
 上から順に実行する。
 
 ```python
@@ -24,6 +24,10 @@ drive.mount("/content/drive")
 ```
 
 ```python
+!uv run --locked task prepare
+```
+
+```python
 !uv run --locked train \
     --wikipedia-count 7500 \
     --corpus-count 7500 \
@@ -38,44 +42,25 @@ drive.mount("/content/drive")
 評価の最後に出る「実験サマリー」を貼れば、学習条件と評価結果をまとめて共有できる。
 
 学習データはDrive上の元データ2本を先頭から読み、入力・正解が空の行を除外して各指定件数の有効な例を集め、run内に`train.jsonl`を生成する。
-事前に下記の手順でDriveにデータを保存する。モデルは初回にHugging Faceから取得する。
+準備セルでデータセットとベースモデルをDriveに保存し、学習時に再利用する。
 uvがプロジェクト用のPython 3.14と依存関係を用意する。
 所要時間と消費コンピュートユニットは、割り当てられたGPUによって変わる。
 
-## dataset
+## データセットとベースモデルの準備
 
-初回のみ、別のColabノートブックで以下を実行しDriveへ元データを保存する。
-Driveに約36.5 GBの空きが必要。
+準備セルは毎回同じコマンドを実行すればよい。
+初回だけHugging Faceから取得し、保存済みなら通信せずにスキップする。
+Driveには元データ約36.5 GBに加え、ベースモデル用の空きが必要。
+別のデータセット準備用ノートブックは不要。
 
-```python
-%pip -q install huggingface_hub
+- データセット: `/content/drive/MyDrive/datasets/zenz-v2.5-dataset`
+- ベースモデル: `/content/drive/MyDrive/models/llm-jp-3-150m`
 
-from pathlib import Path
-from google.colab import drive
-from huggingface_hub import snapshot_download
-
-drive.mount("/content/drive")
-
-destination = Path("/content/drive/MyDrive/datasets/zenz-v2.5-dataset")
-revision = "7d9c9ea36347b638a627c1d264da48ebc7eb38aa"
-
-snapshot_download(
-    repo_id="Miwa-Keita/zenz-v2.5-dataset",
-    repo_type="dataset",
-    revision=revision,
-    allow_patterns=[
-        "train_wikipedia.jsonl",
-        "train_llm-jp-corpus-v3.jsonl",
-    ],
-    local_dir=destination,
-)
-
-for name in ("train_wikipedia.jsonl", "train_llm-jp-corpus-v3.jsonl"):
-    path = destination / name
-    print(f"{path}: {path.stat().st_size / 1_000_000_000:.2f} GB")
-
-print("準備完了:", destination)
-```
+従来の手順で保存したデータセットも、対象の2ファイルが揃っていればそのまま使う。
+モデルはダウンロード成功後に完了印を保存し、中断した場合は次回に取得を再試行する。
+モデル・データセットのID、固定revision、保存先、対象ファイルは
+[共通設定](src/generic_zenzai_202611/config.py)で管理する。
+保存先を変える場合は、準備コマンドと学習コマンドの両方に同じ`--dataset-dir`・`--model-dir`を指定する。
 
 ## 詳しい使い方
 

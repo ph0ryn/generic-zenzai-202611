@@ -11,7 +11,9 @@ from transformers.trainer_callback import PrinterCallback
 from trl import SFTConfig, SFTTrainer
 
 from .checkpoints import resolve_run, valid_checkpoint
+from .config import DATASET_DIR, MODEL_DIR, MODEL_ID, MODEL_REVISION
 from .generate_data import generate_train_jsonl
+from .prepare import prepare_model
 from .prompting import CONTEXT_CHARS, MAX_TOKENS, make_prompt
 from .training_data import encode_example, prepare_dataset
 
@@ -29,9 +31,6 @@ __all__ = [
     "resolve_run",
     "valid_checkpoint",
 ]
-
-MODEL_ID = "llm-jp/llm-jp-3-150m"
-MODEL_REVISION = "b112feef602fff752e4dac4c30af6a2c2fa41c7a"
 
 
 class TrainingLogCallback(TrainerCallback):
@@ -61,9 +60,15 @@ def main():
     )
     parser.add_argument("--model", default=MODEL_ID)
     parser.add_argument(
+        "--model-dir",
+        type=Path,
+        default=MODEL_DIR,
+        help="既定のベースモデルを保存・再利用するディレクトリ",
+    )
+    parser.add_argument(
         "--dataset-dir",
         type=Path,
-        default=Path("/content/drive/MyDrive/datasets/zenz-v2.5-dataset"),
+        default=DATASET_DIR,
         help="Driveに保存した元データのディレクトリ",
     )
     parser.add_argument("--wikipedia-count", type=int, required=True)
@@ -117,7 +122,8 @@ def main():
 
     set_seed(42)
     revision = MODEL_REVISION if args.model == MODEL_ID else None
-    tokenizer = AutoTokenizer.from_pretrained(args.model, revision=revision)
+    model_source = prepare_model(args.model_dir) if revision else args.model
+    tokenizer = AutoTokenizer.from_pretrained(model_source, revision=revision)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     dataset = prepare_dataset(data_path, tokenizer)
@@ -145,7 +151,7 @@ def main():
             )
 
     model = AutoModelForCausalLM.from_pretrained(
-        args.model, revision=revision, dtype=torch.float32, attn_implementation="sdpa"
+        model_source, revision=revision, dtype=torch.float32, attn_implementation="sdpa"
     )
     precision = mixed_precision(args.cpu)
     trainer = SFTTrainer(

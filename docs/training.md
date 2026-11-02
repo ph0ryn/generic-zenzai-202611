@@ -31,7 +31,13 @@ JSONの破損やその他の入力検証エラーは除外せずに停止する�
 学習中の`loss`は予測誤差であり、変換精度ではない。
 学習完了後、別コマンドで[AJIMEE評価](evaluation.md)を実行する。
 
-既定モデルのrevisionは固定し、使用した値を`run.json`に記録する。
+`uv run --locked task prepare`で元データとベースモデルをDriveへ事前保存する。
+保存済みのものは再取得せず、学習ではDrive上のベースモデルを読み込む。
+既定モデルが未保存の場合は学習時にも取得する。
+保存先を変える場合は、準備・学習の両コマンドに同じ`--model-dir`を指定する。
+`--model`で別のモデルIDやローカルパスを指定した場合は、その指定先を直接読み込む。
+モデル・データセットの共有設定は[config.py](../src/generic_zenzai_202611/config.py)で管理する。
+既定モデルのrevisionは固定し、Drive上のパスではなくモデルIDとrevisionを`run.json`に記録する。
 モデルの出典は[LLM-jpのモデルカード](https://huggingface.co/llm-jp/llm-jp-3-150m)、
 学習データの出典・ライセンス・品質上の制限は[以下の説明](#学習データの出典と制限)を参照。
 その他のCLIオプションは`uv run --locked train --help`で確認できる。

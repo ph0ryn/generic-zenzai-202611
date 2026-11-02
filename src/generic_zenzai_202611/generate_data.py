@@ -4,7 +4,7 @@ import json
 import os
 import tempfile
 
-SOURCES = ("train_wikipedia.jsonl", "train_llm-jp-corpus-v3.jsonl")
+from .config import DATASET_SOURCES
 
 
 def generate_train_jsonl(dataset_dir, output, wikipedia_count, corpus_count):
@@ -18,7 +18,7 @@ def generate_train_jsonl(dataset_dir, output, wikipedia_count, corpus_count):
     try:
         with tempfile.NamedTemporaryFile(dir=output.parent, delete=False) as target:
             temporary = target.name
-            for filename, count in zip(SOURCES, counts, strict=True):
+            for filename, count in zip(DATASET_SOURCES, counts, strict=True):
                 if count == 0:
                     continue
                 path = dataset_dir / filename

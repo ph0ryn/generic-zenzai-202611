@@ -18,6 +18,8 @@ from transformers import (
     PreTrainedTokenizerFast,
 )
 
+from generic_zenzai_202611.config import MODEL_ID, MODEL_REVISION
+from generic_zenzai_202611.prepare import prepare_model
 from generic_zenzai_202611.train import (
     encode_example,
     make_prompt,
@@ -272,6 +274,9 @@ class TrainingTest(unittest.TestCase):
             )
             before = model.get_input_embeddings().weight.detach().clone()
             model.save_pretrained(base)
+            # Mark the synthetic snapshot through the same preparation entry point.
+            with patch("generic_zenzai_202611.prepare.snapshot_download"):
+                prepare_model(base)
             sources = root / "dataset"
             sources.mkdir()
             for filename, row in (
@@ -295,7 +300,7 @@ class TrainingTest(unittest.TestCase):
             exported_model = root / "model-path.txt"
             command = [
                 str(Path(sys.executable).with_name("train")),
-                "--model",
+                "--model-dir",
                 str(base),
                 "--dataset-dir",
                 str(sources),
@@ -354,6 +359,9 @@ class TrainingTest(unittest.TestCase):
                 tokens = trained.generate(**inputs, max_new_tokens=2, do_sample=False)
             self.assertGreater(tokens.shape[-1], inputs.input_ids.shape[-1])
             metadata = json.loads((output / "run.json").read_text())
+            self.assertEqual(metadata["model"], MODEL_ID)
+            self.assertEqual(metadata["revision"], MODEL_REVISION)
+            self.assertIn(f"ベースモデルは保存済み: {base}", result.stdout)
             self.assertEqual(metadata["examples"], 34)
             self.assertEqual(metadata["batch_size"], 32)
             self.assertEqual(metadata["gradient_accumulation"], 1)
@@ -419,6 +427,23 @@ class TrainingTest(unittest.TestCase):
             )
             self.assertNotEqual(failed.returncode, 0)
             self.assertEqual(exported_model.read_text(encoding="utf-8"), "")
+
+            # Explicit local models still bypass preparation of the default model.
+            custom = subprocess.run(
+                command + ["--model", str(base), "--model-dir", str(root / "unused")],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=root,
+                timeout=120,
+            )
+            self.assertEqual(custom.returncode, 0, custom.stdout + custom.stderr)
+            self.assertFalse((root / "unused").exists())
+            custom_model = Path(exported_model.read_text(encoding="utf-8").strip())
+            custom_metadata = json.loads((custom_model.parent / "run.json").read_text())
+            self.assertEqual(custom_metadata["model"], str(base))
+            self.assertIsNone(custom_metadata["revision"])
 
 
 if __name__ == "__main__":
