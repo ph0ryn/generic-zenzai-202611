@@ -1,2 +1,1 @@
-def main() -> None:
-    print("Hello from generic-zenzai!")
+"""Contextual kana-kanji conversion training."""

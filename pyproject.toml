@@ -1,16 +1,38 @@
 [project]
 name = "generic-zenzai"
 version = "0.1.0"
-description = "Add your description here"
+description = "Fine-tune a Japanese language model for contextual kana-kanji conversion"
 readme = "README.md"
 authors = [
     { name = "ph0ryn", email = "208665755+ph0ryn@users.noreply.github.com" }
 ]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "datasets>=4.7,<5",
+    "torch>=2.14.1,<2.15",
+    "transformers>=5.19,<6",
+    "trl>=1.17.1,<2",
+]
+
+[dependency-groups]
+dev = ["ruff>=0.14", "taskipy>=1.14"]
+
+[tool.taskipy.tasks]
+train = "generic-zenzai"
+test = "python -m unittest discover -s tests -v"
+lint = "ruff check ."
+format = "ruff format ."
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu126", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
 
 [project.scripts]
-generic-zenzai = "generic_zenzai:main"
+generic-zenzai = "generic_zenzai.train:main"
 
 [build-system]
 requires = ["uv_build>=0.13.4,<0.14.0"]
