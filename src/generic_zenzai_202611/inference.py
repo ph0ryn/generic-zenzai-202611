@@ -7,7 +7,7 @@ from .prompting import MAX_TOKENS, make_prompt
 
 
 class Converter:
-    def __init__(self, model_path, *, cpu=False, max_new_tokens=128):
+    def __init__(self, model_path, *, cpu=False, max_new_tokens=64):
         if max_new_tokens <= 0:
             raise ValueError("max-new-tokensは正の整数を指定してください。")
         if not cpu and not torch.cuda.is_available():

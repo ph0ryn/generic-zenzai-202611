@@ -31,7 +31,7 @@ def main():
         type=Path,
         help="評価結果の親ディレクトリ（既定: modelの隣のajimee）",
     )
-    parser.add_argument("--max-new-tokens", type=int, default=128)
+    parser.add_argument("--max-new-tokens", type=int, default=64)
     parser.add_argument("--cpu", action="store_true", help="GPUの代わりにCPUで評価")
     args = parser.parse_args()
     if args.max_new_tokens <= 0:
