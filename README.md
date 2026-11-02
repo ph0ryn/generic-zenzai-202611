@@ -24,7 +24,7 @@ drive.mount("/content/drive")
 ```
 
 ```python
-!uv run --locked generic-zenzai-202611 \
+!uv run --locked train \
     --wikipedia-count 7500 \
     --corpus-count 7500 \
     --epochs 1 \
@@ -32,7 +32,7 @@ drive.mount("/content/drive")
 ```
 
 ```python
-!uv run --locked generic-zenzai-evaluate --model "$(cat model-path.txt)"
+!uv run --locked evaluate --model "$(cat model-path.txt)"
 ```
 
 評価の最後に出る「実験サマリー」を貼れば、学習条件と評価結果をまとめて共有できる。

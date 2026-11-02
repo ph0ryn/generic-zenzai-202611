@@ -6,7 +6,7 @@
 日時入りパスの手入力や、一時変数への格納は不要。
 
 ```python
-!uv run --locked generic-zenzai-evaluate --model "$(cat model-path.txt)"
+!uv run --locked evaluate --model "$(cat model-path.txt)"
 ```
 
 ローカルのシェルでは、先頭の`!`を除いて実行する。
@@ -86,7 +86,7 @@ CUDA GPUを使わない場合は`--cpu`を付ける。ローカルでも同じCL
 評価時に表示された`eval-日時`のディレクトリを指定する。GPUや再推論は不要。
 
 ```python
-!uv run --locked generic-zenzai-summary "/path/to/ajimee/eval-実際の日時"
+!uv run --locked summary "/path/to/ajimee/eval-実際の日時"
 ```
 
 `evaluation.json`・`scores.json`・`predictions.jsonl`を読み、サマリーを表示して

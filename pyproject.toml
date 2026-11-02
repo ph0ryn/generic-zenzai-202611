@@ -18,7 +18,7 @@ dependencies = [
 dev = ["ruff>=0.14", "taskipy>=1.14"]
 
 [tool.taskipy.tasks]
-train = "generic-zenzai-202611"
+train = "train"
 test = "python -m unittest discover -s tests -v"
 lint = "ruff check ."
 format = "ruff format ."
@@ -35,9 +35,9 @@ url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
 [project.scripts]
-generic-zenzai-202611 = "generic_zenzai_202611.train:main"
-generic-zenzai-evaluate = "generic_zenzai_202611.evaluate:main"
-generic-zenzai-summary = "generic_zenzai_202611.summary:main"
+train = "generic_zenzai_202611.train:main"
+evaluate = "generic_zenzai_202611.evaluate:main"
+summary = "generic_zenzai_202611.summary:main"
 
 [build-system]
 requires = ["uv_build>=0.13.4,<0.14.0"]

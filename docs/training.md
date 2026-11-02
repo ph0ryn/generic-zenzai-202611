@@ -31,7 +31,7 @@ Drive上の元データから各ファイルの先頭を読む。`--wikipedia-co
 既定モデルのrevisionは固定し、使用した値を`run.json`に記録する。
 モデルの出典は[LLM-jpのモデルカード](https://huggingface.co/llm-jp/llm-jp-3-150m)、
 学習データの出典・ライセンス・品質上の制限は[以下の説明](#学習データの出典と制限)を参照。
-その他のCLIオプションは`uv run --locked generic-zenzai-202611 --help`で確認できる。
+その他のCLIオプションは`uv run --locked train --help`で確認できる。
 
 ## 保存先
 
@@ -57,7 +57,7 @@ Colabでclone・環境準備・Drive接続をやり直し、元と同じ`--outpu
 保存後に進んだ計算はやり直す。
 
 ```python
-!uv run --locked generic-zenzai-202611 \
+!uv run --locked train \
     --wikipedia-count 7500 \
     --corpus-count 7500 \
     --output /content/drive/MyDrive/generic-zenzai-202611 \
@@ -75,7 +75,7 @@ Colabでclone・環境準備・Drive接続をやり直し、元と同じ`--outpu
 
 ```python
 checkpoint = "/content/drive/MyDrive/generic-zenzai-202611/run-実際の日時/checkpoint-N"
-!uv run --locked generic-zenzai-202611 \
+!uv run --locked train \
     --wikipedia-count 7500 \
     --corpus-count 7500 \
     --output /content/drive/MyDrive/generic-zenzai-202611 \

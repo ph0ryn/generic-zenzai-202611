@@ -294,7 +294,7 @@ class TrainingTest(unittest.TestCase):
             output = root / "runs with spaces and 'quotes'"
             exported_model = root / "model-path.txt"
             command = [
-                str(Path(sys.executable).with_name("generic-zenzai-202611")),
+                str(Path(sys.executable).with_name("train")),
                 "--model",
                 str(base),
                 "--dataset-dir",
