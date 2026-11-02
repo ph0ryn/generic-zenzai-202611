@@ -239,6 +239,10 @@ def main():
     result = trainer.train(
         resume_from_checkpoint=str(args.resume_from) if args.resume_from else None
     )
+    # Measure the training step itself, not final model/tokenizer export.
+    if not args.cpu:
+        peak_reserved_gib = torch.cuda.max_memory_reserved() / 1024**3
+        peak_allocated_gib = torch.cuda.max_memory_allocated() / 1024**3
     trainer.save_model(str(args.output / "model"))
     tokenizer.save_pretrained(args.output / "model")
     result.metrics.update(
@@ -247,10 +251,17 @@ def main():
         effective_batch_size=effective_batch_size,
     )
     result.metrics["dataset_tokens"] = sum(lengths)
+    result.metrics["device_name"] = (
+        "cpu" if args.cpu else torch.cuda.get_device_name(torch.cuda.current_device())
+    )
     if not args.cpu:
-        peak_gib = torch.cuda.max_memory_reserved() / 1024**3
-        result.metrics["peak_cuda_memory_gib"] = round(peak_gib, 3)
-        print(f"最大GPU予約メモリ: {peak_gib:.2f} GiB", flush=True)
+        result.metrics["peak_cuda_memory_gib"] = round(peak_reserved_gib, 3)
+        result.metrics["peak_cuda_allocated_gib"] = round(peak_allocated_gib, 3)
+        print(
+            f"最大GPUメモリ: reserved={peak_reserved_gib:.2f} GiB"
+            f" | allocated={peak_allocated_gib:.2f} GiB",
+            flush=True,
+        )
     trainer.save_metrics("train", result.metrics)
     model_path.write_text(
         str((args.output / "model").resolve()) + "\n", encoding="utf-8"
