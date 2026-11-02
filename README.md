@@ -3,10 +3,10 @@
 LLM-jp-3-150mを追加学習し、読みと直前の文脈からかな漢字変換するモデルを作る。
 Colab上で学習し、AJIMEE-Benchで変換精度を評価できる。
 
-## 学習
+## Usage
 
 Colabで新規ノートブックを作る。
-ランタイムをGPUに変更し、以下の3ブロックを別々のセルにコピーして、
+ランタイムをGPUに変更し、以下の4ブロックを別々のセルにコピーして、
 上から順に実行する。
 
 ```python
@@ -25,6 +25,10 @@ drive.mount("/content/drive")
 
 ```python
 !uv run --locked generic-zenzai-202611 --output /content/drive/MyDrive/generic-zenzai-202611
+```
+
+```python
+!uv run --locked generic-zenzai-evaluate --model "$(cat model-path.txt)"
 ```
 
 学習データ5,000件は同梱済み。モデルは初回にHugging Faceから取得する。

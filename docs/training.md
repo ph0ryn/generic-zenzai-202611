@@ -1,6 +1,6 @@
 # 学習設定と再開
 
-Colabでの開始手順は[README](../README.md#学習)を参照。
+Colabでの開始手順は[README](../README.md#usage)を参照。
 
 ## 学習内容と既定値
 
