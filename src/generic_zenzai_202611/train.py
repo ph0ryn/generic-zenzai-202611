@@ -11,6 +11,7 @@ from transformers.trainer_callback import PrinterCallback
 from trl import SFTConfig, SFTTrainer
 
 from .checkpoints import resolve_run, valid_checkpoint
+from .generate_data import generate_train_jsonl
 from .prompting import CONTEXT_CHARS, MAX_TOKENS, make_prompt
 from .training_data import encode_example, prepare_dataset
 
@@ -59,7 +60,14 @@ def main():
         description="文脈付きかな漢字変換を全パラメータ学習する"
     )
     parser.add_argument("--model", default=MODEL_ID)
-    parser.add_argument("--data", type=Path, default=Path("data/train.jsonl"))
+    parser.add_argument(
+        "--dataset-dir",
+        type=Path,
+        default=Path("/content/drive/MyDrive/datasets/zenz-v2.5-dataset"),
+        help="Driveに保存した元データのディレクトリ",
+    )
+    parser.add_argument("--wikipedia-count", type=int, required=True)
+    parser.add_argument("--corpus-count", type=int, required=True)
     parser.add_argument(
         "--output",
         type=Path,
@@ -77,6 +85,10 @@ def main():
     args = parser.parse_args()
     if args.epochs <= 0 or args.save_steps <= 0:
         parser.error("epochsとsave-stepsは正の値を指定してください。")
+    if min(args.wikipedia_count, args.corpus_count) < 0 or not (
+        args.wikipedia_count + args.corpus_count
+    ):
+        parser.error("各件数は0以上、合計は正の整数にしてください。")
     if not args.cpu and not torch.cuda.is_available():
         parser.error("CUDA GPUが必要です。ColabのランタイムをGPUに変更してください。")
     try:
@@ -91,16 +103,28 @@ def main():
     if args.resume_from:
         print(f"再開元: {args.resume_from}", flush=True)
 
+    data_path = args.output / "train.jsonl"
+    try:
+        generate_train_jsonl(
+            args.dataset_dir,
+            data_path,
+            args.wikipedia_count,
+            args.corpus_count,
+        )
+    except (OSError, ValueError) as error:
+        parser.error(f"学習データを生成できません: {error}")
+    print(f"生成した学習データ: {data_path}", flush=True)
+
     set_seed(42)
     revision = MODEL_REVISION if args.model == MODEL_ID else None
     tokenizer = AutoTokenizer.from_pretrained(args.model, revision=revision)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
-    dataset = prepare_dataset(args.data, tokenizer)
+    dataset = prepare_dataset(data_path, tokenizer)
     settings = {
         "model": args.model,
         "revision": revision,
-        "data_sha256": hashlib.sha256(args.data.read_bytes()).hexdigest(),
+        "data_sha256": hashlib.sha256(data_path.read_bytes()).hexdigest(),
         "examples": len(dataset),
         "max_tokens": MAX_TOKENS,
         "context_chars": CONTEXT_CHARS,

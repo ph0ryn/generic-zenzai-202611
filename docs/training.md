@@ -6,7 +6,11 @@ Colabでの開始手順は[README](../README.md#usage)を参照。
 
 入力は「直前40文字までの文脈＋カタカナの読み」、正解は変換後の文字列。
 損失は正解と終了記号にだけ付け、入力部分には付けない。
-同梱の5,000件のうち、2,500件は文脈なし。
+Drive上の元データから各ファイルの先頭を読む。`--wikipedia-count`と
+`--corpus-count`でそれぞれの件数を必ず指定する（例: 各7,500件で計15,000件）。
+元データが別の場所なら`--dataset-dir`を指定する。
+生成した`train.jsonl`はrun内に保存する。
+各ソースの指定件数に足りなければエラーにする。先頭から読み、並べ替え・重複除去はしない。
 
 | 設定 | 既定値 |
 | --- | --- |
@@ -26,7 +30,7 @@ Colabでの開始手順は[README](../README.md#usage)を参照。
 
 既定モデルのrevisionは固定し、使用した値を`run.json`に記録する。
 モデルの出典は[LLM-jpのモデルカード](https://huggingface.co/llm-jp/llm-jp-3-150m)、
-学習データの出典・ライセンス・品質上の制限は[学習データの説明](../data/README.md)を参照。
+学習データの出典・ライセンス・品質上の制限は[以下の説明](#学習データの出典と制限)を参照。
 その他のCLIオプションは`uv run --locked generic-zenzai-202611 --help`で確認できる。
 
 ## 保存先
@@ -53,11 +57,16 @@ Colabでclone・環境準備・Drive接続をやり直し、元と同じ`--outpu
 保存後に進んだ計算はやり直す。
 
 ```python
-!uv run --locked generic-zenzai-202611 --output /content/drive/MyDrive/generic-zenzai-202611 --resume
+!uv run --locked generic-zenzai-202611 \
+    --wikipedia-count 7500 \
+    --corpus-count 7500 \
+    --output /content/drive/MyDrive/generic-zenzai-202611 \
+    --resume
 ```
 
 最新runに有効なチェックポイントがない場合や、完了済みの場合はエラーになる。
 古いrunや新規学習へ自動では切り替えない。
+件数を変更して学習したrunを再開するときは、元と同じ件数オプションを再指定する。
 また、`run.json`に記録したモデル・データ・設定が元と異なる場合も再開できない。
 
 特定のチェックポイントを指定する場合は、`--resume`の代わりに`--resume-from`を使う。
@@ -66,8 +75,27 @@ Colabでclone・環境準備・Drive接続をやり直し、元と同じ`--outpu
 
 ```python
 checkpoint = "/content/drive/MyDrive/generic-zenzai-202611/run-実際の日時/checkpoint-N"
-!uv run --locked generic-zenzai-202611 --output /content/drive/MyDrive/generic-zenzai-202611 --resume-from "{checkpoint}"
+!uv run --locked generic-zenzai-202611 \
+    --wikipedia-count 7500 \
+    --corpus-count 7500 \
+    --output /content/drive/MyDrive/generic-zenzai-202611 \
+    --resume-from "{checkpoint}"
 ```
 
 チェックポイントを保存する前に失敗した場合は、原因を解消して`--resume`なしでやり直す。
 失敗したrunは残り、新しいrunで最初から学習する。
+
+## 学習データの出典と制限
+
+元データは[Miwa-Keita/zenz-v2.5-dataset](https://huggingface.co/datasets/Miwa-Keita/zenz-v2.5-dataset/tree/7d9c9ea36347b638a627c1d264da48ebc7eb38aa)の
+revision `7d9c9ea36347b638a627c1d264da48ebc7eb38aa`をDriveに取得する。
+学習用ファイルはリポジトリに同梱しない。生成した`train.jsonl`のSHA-256は`run.json`に記録する。
+元データ全体からの一様な標本ではなく、読みや意味の人手検証もしていない。
+
+元データの作成者はMiwa-Keita。Wikipedia由来の`train_wikipedia.jsonl`には
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/deed.ja)が適用され、
+2024年2月取得の日本語Wikipediaアーカイブに由来する。
+`train_llm-jp-corpus-v3.jsonl`は[llm-jp-corpus-v3](https://gitlab.llm-jp.nii.ac.jp/datasets/llm-jp-corpus-v3)の
+Common Crawl由来データに基づき、[ODC-BY 1.0](https://opendatacommons.org/licenses/by/1-0/)と
+[Common Crawlの利用条件](https://commoncrawl.org/terms-of-use)が適用される。
+詳しい謝辞と品質上の注意は[元データのデータカード](https://huggingface.co/datasets/Miwa-Keita/zenz-v2.5-dataset/raw/7d9c9ea36347b638a627c1d264da48ebc7eb38aa/README.md)を参照。

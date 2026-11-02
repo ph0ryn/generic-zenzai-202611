@@ -272,22 +272,37 @@ class TrainingTest(unittest.TestCase):
             )
             before = model.get_input_embeddings().weight.detach().clone()
             model.save_pretrained(base)
-            data = root / "train.jsonl"
-            rows = [
-                {"input": "アツイ", "output": "熱い", "left_context": "お湯に触れた。"},
-                {"input": "アツイ", "output": "暑い", "left_context": None},
-            ] * 17
-            data.write_text(
-                "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
-            )
+            sources = root / "dataset"
+            sources.mkdir()
+            for filename, row in (
+                (
+                    "train_wikipedia.jsonl",
+                    {
+                        "input": "アツイ",
+                        "output": "熱い",
+                        "left_context": "お湯に触れた。",
+                    },
+                ),
+                (
+                    "train_llm-jp-corpus-v3.jsonl",
+                    {"input": "アツイ", "output": "暑い", "left_context": None},
+                ),
+            ):
+                (sources / filename).write_text(
+                    (json.dumps(row, ensure_ascii=False) + "\n") * 17
+                )
             output = root / "runs with spaces and 'quotes'"
             exported_model = root / "model-path.txt"
             command = [
                 str(Path(sys.executable).with_name("generic-zenzai-202611")),
                 "--model",
                 str(base),
-                "--data",
-                str(data),
+                "--dataset-dir",
+                str(sources),
+                "--wikipedia-count",
+                "17",
+                "--corpus-count",
+                "17",
                 "--output",
                 str(output),
                 "--cpu",
@@ -340,6 +355,10 @@ class TrainingTest(unittest.TestCase):
             self.assertGreater(tokens.shape[-1], inputs.input_ids.shape[-1])
             metadata = json.loads((output / "run.json").read_text())
             self.assertEqual(metadata["examples"], 34)
+            self.assertEqual(
+                len((output / "train.jsonl").read_text(encoding="utf-8").splitlines()),
+                34,
+            )
             metrics = json.loads((output / "train_results.json").read_text())
             self.assertEqual(metrics["global_step"], 2)
             self.assertEqual(metrics["precision"], "fp32")
@@ -383,7 +402,7 @@ class TrainingTest(unittest.TestCase):
 
             # A failed new training must not leave the previous model exported.
             failed = subprocess.run(
-                command + ["--data", str(root / "missing.jsonl")],
+                command + ["--dataset-dir", str(root / "missing-dataset")],
                 check=False,
                 capture_output=True,
                 text=True,
