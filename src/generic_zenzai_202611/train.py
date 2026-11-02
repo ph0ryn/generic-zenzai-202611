@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 
 import torch
+import transformers
+import trl
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback, set_seed
 from transformers.trainer_callback import PrinterCallback
 from trl import SFTConfig, SFTTrainer
@@ -251,6 +253,11 @@ def main():
         effective_batch_size=effective_batch_size,
     )
     result.metrics["dataset_tokens"] = sum(lengths)
+    result.metrics["checkpoint_interval_steps"] = args.save_steps
+    result.metrics["torch_version"] = torch.__version__
+    result.metrics["transformers_version"] = transformers.__version__
+    result.metrics["trl_version"] = trl.__version__
+    result.metrics["cuda_version"] = torch.version.cuda
     result.metrics["device_name"] = (
         "cpu" if args.cpu else torch.cuda.get_device_name(torch.cuda.current_device())
     )
