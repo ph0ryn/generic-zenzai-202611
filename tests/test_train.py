@@ -327,6 +327,10 @@ class TrainingTest(unittest.TestCase):
             self.assertEqual(metrics["effective_batch_size"], 4)
             self.assertEqual(metrics["global_step"], 1)
             self.assertEqual(metrics["device_name"], "cpu")
+            self.assertEqual(metrics["checkpoint_interval_steps"], 1)
+            self.assertIsNone(metrics["cuda_version"])
+            for package in ("torch", "transformers", "trl"):
+                self.assertTrue(metrics[f"{package}_version"])
             self.assertNotIn("peak_cuda_memory_gib", metrics)
             self.assertGreater(metrics["dataset_tokens"], 0)
 
