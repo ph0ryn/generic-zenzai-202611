@@ -24,7 +24,7 @@ drive.mount("/content/drive")
 ```
 
 ```python
-!uv run --locked generic-zenzai-202611 --output /content/drive/MyDrive/generic-zenzai-202611/run-001
+!uv run --locked generic-zenzai-202611 --output /content/drive/MyDrive/generic-zenzai-202611
 ```
 
 学習データ5,000件は同梱済み。モデルは初回にHugging Faceから取得する。
@@ -60,7 +60,8 @@ GPUの種類、VRAM、残りのコンピュートユニットは実行時に確�
 
 ## 保存と再開
 
-指定した`--output`に次を保存する。
+指定した`--output`の下に`run-日時`ディレクトリを自動作成し、次を保存する。
+実際の出力先は開始時に表示する。通常実行のたびに新しいrunを作り、既存のrunは上書きしない。
 
 - `model/`: 学習済みモデルとtokenizer。`from_pretrained`で読み込める。
 - `checkpoint-N/`: モデル、optimizer、学習進捗などの再開用状態。
@@ -68,28 +69,22 @@ GPUの種類、VRAM、残りのコンピュートユニットは実行時に確�
 - `train_results.json`: 完了時の学習損失、速度など。
 
 途中で切断したらclone・環境準備・Driveの接続をやり直し、
-学習コマンドに最後まで保存されたチェックポイントを指定する。
-`checkpoint-50`は実際に存在する名前に置き換える。
+同じ`--output`に`--resume`を付けて実行する。
+最新のrun内で、再開用ファイルが揃った最後のチェックポイントを自動選択する。
 
 ```python
-!uv run --locked generic-zenzai-202611 --output /content/drive/MyDrive/generic-zenzai-202611/run-001 --resume-from /content/drive/MyDrive/generic-zenzai-202611/run-001/checkpoint-50
+!uv run --locked generic-zenzai-202611 --output /content/drive/MyDrive/generic-zenzai-202611 --resume
 ```
 
 再開は保存時点から。保存後に進んだ計算はやり直す。
-モデル・データ・主要な学習設定が異なる場合は停止する。
-新しい実験では`run-002`など別の出力先を使う。
-既存の出力先への誤った上書きは拒否する。
+最新のrunにチェックポイントがない、完了済み、またはモデル・データ・主要な学習設定が
+異なる場合はエラー終了する。古いrunへの切り替えや、新規学習への切り替えはしない。
+特定のチェックポイントから再開する場合は、`--resume`の代わりに
+`--resume-from /実際のrun/checkpoint-N`を指定する。
 
-学習開始直後のエラーでチェックポイントがない場合は、
-コードを更新し、未使用の出力先で最初から実行する。
-以下の`run-002`は、すでに使用していれば別の名前に変更する。
-
-```python
-%cd /content/generic-zenzai-202611
-!git pull --ff-only
-!uv sync --locked
-!uv run --locked generic-zenzai-202611 --output /content/drive/MyDrive/generic-zenzai-202611/run-002
-```
+学習開始直後のエラーでチェックポイントがない場合は、原因を解消してから
+`--resume`なしで実行する。新しい日時付きrunで最初から学習し、失敗したrunは残す。
+修正版のコードが必要な場合は、実行前に`git pull --ff-only`と`uv sync --locked`で更新する。
 
 ## ローカル開発
 
@@ -100,6 +95,6 @@ uv run task test
 ```
 
 テストはダウンロード不要の小さなモデルをCPUで実際に学習し、
-重みの更新・保存・推論・再開・上書き拒否を確認する。
+重みの更新・保存・推論・再開・出力先の分離・再開できない場合の終了を確認する。
 通常の学習コマンドにはCUDA GPUが必要。
 `--cpu`は小規模な動作確認用。

@@ -23,6 +23,7 @@ from generic_zenzai_202611.train import (
     make_prompt,
     mixed_precision,
     prepare_dataset,
+    resolve_run,
 )
 
 
@@ -45,6 +46,67 @@ def make_tokenizer():
         bos_token="<s>",
         eos_token="</s>",
     )
+
+
+class RunTest(unittest.TestCase):
+    def checkpoint(self, run, step):
+        path = run / f"checkpoint-{step}"
+        path.mkdir(parents=True)
+        for name in (
+            "optimizer.pt",
+            "scheduler.pt",
+            "config.json",
+            "model.safetensors",
+        ):
+            (path / name).touch()
+        (path / "trainer_state.json").write_text("{}")
+        return path
+
+    def test_new_runs_are_unique_and_preserve_existing_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            first, checkpoint = resolve_run(output)
+            self.assertIsNone(checkpoint)
+            (first / "run.json").write_text("original")
+            second, _ = resolve_run(output)
+            self.assertNotEqual(first, second)
+            self.assertTrue(second.is_dir())
+            self.assertEqual((first / "run.json").read_text(), "original")
+
+    def test_resume_selects_latest_run_and_latest_valid_checkpoint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            self.checkpoint(output / "run-001", 100)
+            run = output / "run-002"
+            checkpoint = self.checkpoint(run, 50)
+            self.checkpoint(run, 9)
+            incomplete = self.checkpoint(run, 60)
+            (incomplete / "optimizer.pt").unlink()
+            self.assertEqual(resolve_run(output, resume=True), (run, checkpoint))
+            self.assertEqual(
+                resolve_run(output, resume_from=checkpoint), (run, checkpoint)
+            )
+            self.assertEqual(
+                resolve_run(run, resume_from=checkpoint), (run, checkpoint)
+            )
+
+    def test_resume_failure_never_creates_run_or_falls_back_to_older_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "missing"
+            with self.assertRaises(ValueError):
+                resolve_run(output, resume=True)
+            self.assertFalse(output.exists())
+            self.checkpoint(output / "run-001", 50)
+            latest = output / "run-002"
+            latest.mkdir()
+            before = sorted(output.iterdir())
+            with self.assertRaises(ValueError):
+                resolve_run(output, resume=True)
+            self.checkpoint(latest, 50)
+            (latest / "train_results.json").write_text("{}")
+            with self.assertRaises(ValueError):
+                resolve_run(output, resume=True)
+            self.assertEqual(sorted(output.iterdir()), before)
 
 
 class PrecisionTest(unittest.TestCase):
@@ -173,6 +235,8 @@ class TrainingTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("計算精度: fp32", result.stdout)
+            output = next(output.glob("run-*"))
+            self.assertIn(f"出力先: {output}", result.stdout)
             self.assertTrue((output / "model" / "model.safetensors").is_file())
             trained = AutoModelForCausalLM.from_pretrained(output / "model")
             restored_tokenizer = AutoTokenizer.from_pretrained(output / "model")
@@ -192,9 +256,9 @@ class TrainingTest(unittest.TestCase):
             checkpoint = output / "checkpoint-2"
             self.assertTrue((checkpoint / "optimizer.pt").is_file())
 
-            # An accidental second run must not overwrite the saved experiment.
+            # Automatic resume must not restart a completed run.
             repeated = subprocess.run(
-                command,
+                command + ["--resume"],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -202,8 +266,11 @@ class TrainingTest(unittest.TestCase):
                 timeout=120,
             )
             self.assertNotEqual(repeated.returncode, 0)
+            self.assertIn("完了済み", repeated.stderr)
+            # Simulate interruption after checkpoint save but before final metrics.
+            (output / "train_results.json").unlink()
             resumed = subprocess.run(
-                command + ["--resume-from", str(checkpoint), "--epochs", "2"],
+                command + ["--resume", "--epochs", "2"],
                 check=False,
                 capture_output=True,
                 text=True,
