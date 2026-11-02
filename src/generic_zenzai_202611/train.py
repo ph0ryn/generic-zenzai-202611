@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
+from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback, set_seed
+from transformers.trainer_callback import PrinterCallback
 from trl import SFTConfig, SFTTrainer
 
 from .checkpoints import resolve_run, valid_checkpoint
@@ -30,6 +31,20 @@ __all__ = [
 
 MODEL_ID = "llm-jp/llm-jp-3-150m"
 MODEL_REVISION = "b112feef602fff752e4dac4c30af6a2c2fa41c7a"
+
+
+class TrainingLogCallback(TrainerCallback):
+    """Use line-based metrics instead of Trainer's raw dictionary output."""
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if not state.is_world_process_zero or not logs:
+            return
+        metrics = " | ".join(
+            f"{name}: {value:.6g}" if isinstance(value, float) else f"{name}: {value}"
+            for name, value in logs.items()
+            if name != "total_flos"
+        )
+        print(f"step {state.global_step}/{state.max_steps} | {metrics}", flush=True)
 
 
 def mixed_precision(cpu):
@@ -127,7 +142,9 @@ def main():
             optim="adamw_torch",
             warmup_steps=0.05,
             logging_steps=10,
+            logging_first_step=True,
             logging_nan_inf_filter=False,
+            disable_tqdm=True,
             save_steps=args.save_steps,
             save_total_limit=2,
             eval_strategy="no",
@@ -137,14 +154,24 @@ def main():
             dataloader_pin_memory=not args.cpu,
         ),
     )
+    trainer.remove_callback(PrinterCallback)
+    trainer.add_callback(TrainingLogCallback)
     args.output.mkdir(parents=True, exist_ok=True)
     metadata_path.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n")
-    print(f"学習データ: {len(dataset)}件、実効バッチ: 32、周回数: {args.epochs}")
-    print(f"計算精度: {precision}")
+    effective_batch_size = (
+        trainer.args.per_device_train_batch_size
+        * trainer.args.gradient_accumulation_steps
+        * trainer.args.world_size
+    )
+    print(
+        f"学習データ: {len(dataset)}件 | 実効バッチ: {effective_batch_size} | 周回数: {args.epochs}",
+        flush=True,
+    )
+    print(f"計算精度: {precision}", flush=True)
     result = trainer.train(
         resume_from_checkpoint=str(args.resume_from) if args.resume_from else None
     )
     trainer.save_model(str(args.output / "model"))
     tokenizer.save_pretrained(args.output / "model")
     trainer.save_metrics("train", result.metrics)
-    print(f"学習済みモデル: {args.output / 'model'}")
+    print(f"学習済みモデル: {args.output / 'model'}", flush=True)

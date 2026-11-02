@@ -83,7 +83,11 @@ def main():
             stream.write(json.dumps(row, ensure_ascii=False) + "\n")
             stream.flush()
             predictions.append(row)
-            print(f"評価: {position}/{len(items)}", flush=True)
+            verdict = "完全一致" if row["accuracy_at1"] else "不一致"
+            print(
+                f"{position}/{len(items)} | 判定: {verdict} | MinCER: {row['min_cer']:.4f}",
+                flush=True,
+            )
     scores = summarize(predictions)
     # Written only after every item succeeds; its presence marks a completed evaluation.
     (output / "scores.json").write_text(
@@ -97,11 +101,13 @@ def main():
         score = scores[name]
         if score["count"]:
             print(
-                f"{label}: {score['count']}件、完全一致率: {score['accuracy_at1']:.2%}、"
-                f"平均MinCER: {score['mean_min_cer']:.4f}、生成上限到達: {score['truncated']}件"
+                f"{label}: {score['count']}件 | 完全一致率: {score['accuracy_at1']:.2%} "
+                f"({score['correct']}/{score['count']}) | "
+                f"平均MinCER: {score['mean_min_cer']:.4f} | 生成上限到達: {score['truncated']}件",
+                flush=True,
             )
         else:
-            print(f"{label}: 0件（対象なし）")
+            print(f"{label}: 0件（対象なし）", flush=True)
 
 
 if __name__ == "__main__":

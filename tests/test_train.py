@@ -309,6 +309,15 @@ class TrainingTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("計算精度: fp32", result.stdout)
+            self.assertIn(
+                "学習データ: 34件 | 実効バッチ: 32 | 周回数: 1", result.stdout
+            )
+            self.assertIn("step 1/2 | loss:", result.stdout)
+            self.assertIn("step 2/2 | train_runtime:", result.stdout)
+            self.assertIn("train_loss:", result.stdout)
+            self.assertNotIn("{'loss':", result.stdout)
+            self.assertNotIn("{'train_runtime':", result.stdout)
+            self.assertNotIn("[学習]", result.stdout)
             output = next(output.glob("run-*"))
             self.assertIn(f"出力先: {output}", result.stdout)
             self.assertTrue((output / "model" / "model.safetensors").is_file())

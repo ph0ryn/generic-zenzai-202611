@@ -158,7 +158,25 @@ class EvaluationTest(unittest.TestCase):
         self.assertIsNone(metadata["generation"]["bad_words_ids"])
         self.assertEqual(metadata["context_chars"], 40)
         self.assertEqual(metadata["model"], str(self.model.resolve()))
-        self.assertIn("全体", result.stdout)
+        self.assertIn(f"評価結果: {first}", result.stdout)
+        self.assertEqual(
+            result.stdout.splitlines()[:3],
+            [
+                f"評価結果: {first}",
+                "1/2 | 判定: 完全一致 | MinCER: 0.0000",
+                "2/2 | 判定: 不一致 | MinCER: 0.5000",
+            ],
+        )
+        self.assertEqual(len(result.stdout.splitlines()), 6)
+        self.assertIn("全体: 2件 | 完全一致率: 50.00% (1/2)", result.stdout)
+        self.assertIn("平均MinCER: 0.2500 | 生成上限到達: 2件", result.stdout)
+        self.assertNotIn("[評価]", result.stdout)
+        self.assertLess(
+            result.stdout.index("判定: 完全一致"), result.stdout.index("判定: 不一致")
+        )
+        self.assertLess(
+            result.stdout.index("判定: 不一致"), result.stdout.index("全体:")
+        )
         repeated = self.evaluate()
         self.assertEqual(repeated.returncode, 0, repeated.stdout + repeated.stderr)
         self.assertEqual(len(list(self.output.glob("eval-*"))), 2)
@@ -187,6 +205,42 @@ class EvaluationTest(unittest.TestCase):
         self.assertTrue(all(row["generated_tokens"] == 1 for row in predictions))
         self.assertTrue(all(not row["truncated"] for row in predictions))
         self.assertTrue(all(row["min_cer"] == 1 for row in predictions))
+        self.assertIn("1/2 | 判定: 不一致 | MinCER: 1.0000", result.stdout)
+        self.assertIn("2/2 | 判定: 不一致 | MinCER: 1.0000", result.stdout)
+
+    def test_logs_omit_content_and_show_empty_group(self):
+        item = self.rows[0]
+        item["context_text"] = '前の文。\n引用: "お湯"\t'
+        item["expected_output"] = ["熱い\nお湯"]
+        self.data.write_text(json.dumps([item], ensure_ascii=False), encoding="utf-8")
+        self.git("add", ".")
+        self.git(
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "multiline fixture",
+        )
+        result = self.evaluate()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for text in ("前の文", "アツイ", "熱い", "予測:", "許容解:", "文脈:", "index:"):
+            self.assertNotIn(text, result.stdout)
+        self.assertIn("1/1 | 判定: 不一致 | MinCER: 0.6000", result.stdout)
+        self.assertEqual(
+            len(
+                [
+                    line
+                    for line in result.stdout.splitlines()
+                    if line.startswith("1/1 |")
+                ]
+            ),
+            1,
+        )
+        self.assertIn("文脈なし: 0件（対象なし）", result.stdout)
 
     def test_uninitialized_submodule_explains_how_to_initialize(self):
         result = self.evaluate(benchmark=self.root / "missing")
