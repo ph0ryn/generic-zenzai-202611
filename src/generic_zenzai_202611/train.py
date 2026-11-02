@@ -80,7 +80,7 @@ def main():
         help="日時付きrunを保存する親ディレクトリ",
     )
     parser.add_argument("--epochs", type=float, default=1)
-    parser.add_argument("--save-steps", type=int, default=50)
+    parser.add_argument("--save-steps", type=int, default=1000)
     resuming = parser.add_mutually_exclusive_group()
     resuming.add_argument("--resume", action="store_true", help="最新runから再開")
     resuming.add_argument(
@@ -178,7 +178,7 @@ def main():
             logging_nan_inf_filter=False,
             disable_tqdm=True,
             save_steps=args.save_steps,
-            save_total_limit=2,
+            save_total_limit=1,
             eval_strategy="no",
             report_to="none",
             seed=settings["seed"],

@@ -408,6 +408,7 @@ class TrainingTest(unittest.TestCase):
             )
             self.assertEqual(training_args.per_device_train_batch_size, 32)
             self.assertEqual(training_args.gradient_accumulation_steps, 1)
+            self.assertEqual(training_args.save_steps, 1)
             self.assertEqual(
                 len((output / "train.jsonl").read_text(encoding="utf-8").splitlines()),
                 34,
@@ -533,7 +534,8 @@ class TrainingTest(unittest.TestCase):
 
             # Explicit local models still bypass preparation of the default model.
             custom = subprocess.run(
-                command + ["--model", str(base), "--model-dir", str(root / "unused")],
+                command[: command.index("--save-steps")]
+                + ["--model", str(base), "--model-dir", str(root / "unused")],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -544,6 +546,11 @@ class TrainingTest(unittest.TestCase):
             self.assertEqual(custom.returncode, 0, custom.stdout + custom.stderr)
             self.assertFalse((root / "unused").exists())
             custom_model = Path(exported_model.read_text(encoding="utf-8").strip())
+            custom_args = torch.load(
+                custom_model / "training_args.bin", weights_only=False
+            )
+            self.assertEqual(custom_args.save_steps, 1000)
+            self.assertEqual(custom_args.save_total_limit, 1)
             custom_metadata = json.loads((custom_model.parent / "run.json").read_text())
             self.assertEqual(custom_metadata["model"], str(base))
             self.assertIsNone(custom_metadata["revision"])
