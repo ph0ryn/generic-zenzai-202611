@@ -1,17 +1,17 @@
-# generic-zenzai
+# generic-zenzai-202611
 
 LLM-jp-3-150mを、文脈と読みからかな漢字変換するモデルに追加学習する。
 uvで環境を固定し、ColabからCLIで学習を実行する。
 
 ## Colabで学習
 
-GitHubにこのリポジトリをpushした後、Colabで新規ノートブックを作る。
+Colabで新規ノートブックを作る。
 ランタイムをGPUに変更し、以下の3ブロックを別々のセルにコピーして、
 上から順に実行する。
 
 ```python
-!git clone https://github.com/ph0ryn/generic-zenzai.git
-%cd /content/generic-zenzai
+!git clone https://github.com/ph0ryn/generic-zenzai-202611.git
+%cd /content/generic-zenzai-202611
 %pip install uv==0.13.4
 !uv sync --locked
 !nvidia-smi
@@ -23,7 +23,7 @@ drive.mount("/content/drive")
 ```
 
 ```python
-!uv run --locked generic-zenzai --output /content/drive/MyDrive/generic-zenzai/run-001
+!uv run --locked generic-zenzai-202611 --output /content/drive/MyDrive/generic-zenzai-202611/run-001
 ```
 
 学習データ5,000件は同梱済み。モデルは初回にHugging Faceから取得する。
@@ -70,7 +70,7 @@ GPUの種類、VRAM、残りのコンピュートユニットは実行時に確�
 `checkpoint-50`は実際に存在する名前に置き換える。
 
 ```python
-!uv run --locked generic-zenzai --output /content/drive/MyDrive/generic-zenzai/run-001 --resume-from /content/drive/MyDrive/generic-zenzai/run-001/checkpoint-50
+!uv run --locked generic-zenzai-202611 --output /content/drive/MyDrive/generic-zenzai-202611/run-001 --resume-from /content/drive/MyDrive/generic-zenzai-202611/run-001/checkpoint-50
 ```
 
 再開は保存時点から。保存後に進んだ計算はやり直す。

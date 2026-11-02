@@ -1,5 +1,5 @@
 [project]
-name = "generic-zenzai"
+name = "generic-zenzai-202611"
 version = "0.1.0"
 description = "Fine-tune a Japanese language model for contextual kana-kanji conversion"
 readme = "README.md"
@@ -18,7 +18,7 @@ dependencies = [
 dev = ["ruff>=0.14", "taskipy>=1.14"]
 
 [tool.taskipy.tasks]
-train = "generic-zenzai"
+train = "generic-zenzai-202611"
 test = "python -m unittest discover -s tests -v"
 lint = "ruff check ."
 format = "ruff format ."
@@ -32,7 +32,7 @@ url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
 [project.scripts]
-generic-zenzai = "generic_zenzai.train:main"
+generic-zenzai-202611 = "generic_zenzai_202611.train:main"
 
 [build-system]
 requires = ["uv_build>=0.13.4,<0.14.0"]

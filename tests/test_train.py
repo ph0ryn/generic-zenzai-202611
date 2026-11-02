@@ -17,7 +17,7 @@ from transformers import (
     PreTrainedTokenizerFast,
 )
 
-from generic_zenzai.train import encode_example, make_prompt, prepare_dataset
+from generic_zenzai_202611.train import encode_example, make_prompt, prepare_dataset
 
 
 def make_tokenizer():
@@ -121,7 +121,7 @@ class TrainingTest(unittest.TestCase):
             )
             output = root / "run"
             command = [
-                str(Path(sys.executable).with_name("generic-zenzai")),
+                str(Path(sys.executable).with_name("generic-zenzai-202611")),
                 "--model",
                 str(base),
                 "--data",
