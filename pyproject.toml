@@ -1,0 +1,17 @@
+[project]
+name = "generic-zenzai"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "ph0ryn", email = "208665755+ph0ryn@users.noreply.github.com" }
+]
+requires-python = ">=3.14"
+dependencies = []
+
+[project.scripts]
+generic-zenzai = "generic_zenzai:main"
+
+[build-system]
+requires = ["uv_build>=0.13.4,<0.14.0"]
+build-backend = "uv_build"
