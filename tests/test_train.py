@@ -291,6 +291,43 @@ class DataTest(unittest.TestCase):
 
 
 class TrainingTest(unittest.TestCase):
+    def test_cli_rejects_unprepared_model_without_downloading(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sources = root / "dataset"
+            sources.mkdir()
+            (sources / "train_wikipedia.jsonl").write_text(
+                json.dumps({"input": "アツイ", "output": "熱い", "left_context": None})
+                + "\n"
+            )
+            base = root / "missing-model"
+            result = subprocess.run(
+                [
+                    str(Path(sys.executable).with_name("train")),
+                    "--model-dir",
+                    str(base),
+                    "--dataset-dir",
+                    str(sources),
+                    "--wikipedia-count",
+                    "1",
+                    "--corpus-count",
+                    "0",
+                    "--output",
+                    str(root / "runs"),
+                    "--cpu",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={**os.environ, "HF_HUB_OFFLINE": "1"},
+                cwd=root,
+                timeout=30,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("uv run --locked task prepare", result.stderr)
+            self.assertNotIn("ベースモデルを取得", result.stdout)
+            self.assertFalse(base.exists())
+
     def test_cli_trains_saves_reloads_and_resumes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -399,7 +436,8 @@ class TrainingTest(unittest.TestCase):
             metadata = json.loads((output / "run.json").read_text())
             self.assertEqual(metadata["model"], MODEL_ID)
             self.assertEqual(metadata["revision"], MODEL_REVISION)
-            self.assertIn(f"ベースモデルは保存済み: {base}", result.stdout)
+            self.assertNotIn("ベースモデルは保存済み", result.stdout)
+            self.assertNotIn("ベースモデルを取得", result.stdout)
             self.assertEqual(metadata["examples"], 34)
             self.assertEqual(metadata["batch_size"], 32)
             self.assertEqual(metadata["gradient_accumulation"], 1)

@@ -16,12 +16,25 @@ from .config import (
 )
 
 
+def prepared_model_path(destination):
+    """Validate a prepared snapshot without downloading or changing any files."""
+    marker = destination / ".base-model-revision"
+    try:
+        revision = marker.read_text(encoding="utf-8").strip()
+    except FileNotFoundError as error:
+        raise ValueError(
+            f"{destination}: ベースモデルが未準備です。先にuv run --locked task prepareを実行してください。"
+        ) from error
+    if revision != MODEL_REVISION:
+        raise ValueError(f"{destination}: モデルのrevisionが異なります。")
+    return destination
+
+
 def prepare_model(destination):
     """Reuse a completed snapshot, or download/resume it at the pinned revision."""
     marker = destination / ".base-model-revision"
     if marker.is_file():
-        if marker.read_text(encoding="utf-8").strip() != MODEL_REVISION:
-            raise ValueError(f"{destination}: モデルのrevisionが異なります。")
+        prepared_model_path(destination)
         print(f"ベースモデルは保存済み: {destination}", flush=True)
     else:
         print(f"ベースモデルを取得: {destination}", flush=True)

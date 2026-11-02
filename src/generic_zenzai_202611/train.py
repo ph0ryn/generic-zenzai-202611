@@ -13,7 +13,7 @@ from trl import SFTConfig, SFTTrainer
 from .checkpoints import remove_checkpoints, resolve_run, valid_checkpoint
 from .config import DATASET_DIR, MODEL_DIR, MODEL_ID, MODEL_REVISION
 from .generate_data import generate_train_jsonl
-from .prepare import prepare_model
+from .prepare import prepared_model_path
 from .prompting import CONTEXT_CHARS, MAX_TOKENS, make_prompt
 from .training_data import encode_example, prepare_dataset
 
@@ -63,7 +63,7 @@ def main():
         "--model-dir",
         type=Path,
         default=MODEL_DIR,
-        help="既定のベースモデルを保存・再利用するディレクトリ",
+        help="事前に保存した既定のベースモデルのディレクトリ",
     )
     parser.add_argument(
         "--dataset-dir",
@@ -122,8 +122,13 @@ def main():
 
     set_seed(42)
     revision = MODEL_REVISION if args.model == MODEL_ID else None
-    model_source = prepare_model(args.model_dir) if revision else args.model
-    tokenizer = AutoTokenizer.from_pretrained(model_source, revision=revision)
+    try:
+        model_source = prepared_model_path(args.model_dir) if revision else args.model
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_source, revision=revision, local_files_only=revision is not None
+    )
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     dataset = prepare_dataset(data_path, tokenizer)
@@ -151,7 +156,11 @@ def main():
             )
 
     model = AutoModelForCausalLM.from_pretrained(
-        model_source, revision=revision, dtype=torch.float32, attn_implementation="sdpa"
+        model_source,
+        revision=revision,
+        local_files_only=revision is not None,
+        dtype=torch.float32,
+        attn_implementation="sdpa",
     )
     precision = mixed_precision(args.cpu)
     trainer = SFTTrainer(
