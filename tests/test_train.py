@@ -287,7 +287,7 @@ class TrainingTest(unittest.TestCase):
                 ),
             ):
                 (sources / name).write_text(
-                    (json.dumps(row, ensure_ascii=False) + "\\n") * 2,
+                    (json.dumps(row, ensure_ascii=False) + "\n") * 2,
                     encoding="utf-8",
                 )
 
