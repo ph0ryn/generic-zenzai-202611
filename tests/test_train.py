@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import torch
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
@@ -17,7 +18,12 @@ from transformers import (
     PreTrainedTokenizerFast,
 )
 
-from generic_zenzai_202611.train import encode_example, make_prompt, prepare_dataset
+from generic_zenzai_202611.train import (
+    encode_example,
+    make_prompt,
+    mixed_precision,
+    prepare_dataset,
+)
 
 
 def make_tokenizer():
@@ -39,6 +45,25 @@ def make_tokenizer():
         bos_token="<s>",
         eos_token="</s>",
     )
+
+
+class PrecisionTest(unittest.TestCase):
+    def test_precision_requires_native_bf16_support(self):
+        for cpu, native_bf16, expected in (
+            (False, False, "fp16"),  # T4 can emulate bf16 but cannot run its CUDA GEMM.
+            (False, True, "bf16"),
+            (True, False, "fp32"),
+        ):
+            with (
+                self.subTest(cpu=cpu, native_bf16=native_bf16),
+                patch(
+                    "torch.cuda.is_bf16_supported",
+                    side_effect=lambda including_emulation=True, native=native_bf16: (
+                        native or including_emulation
+                    ),
+                ),
+            ):
+                self.assertEqual(mixed_precision(cpu), expected)
 
 
 class DataTest(unittest.TestCase):
@@ -147,6 +172,7 @@ class TrainingTest(unittest.TestCase):
                 timeout=120,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("計算精度: fp32", result.stdout)
             self.assertTrue((output / "model" / "model.safetensors").is_file())
             trained = AutoModelForCausalLM.from_pretrained(output / "model")
             restored_tokenizer = AutoTokenizer.from_pretrained(output / "model")

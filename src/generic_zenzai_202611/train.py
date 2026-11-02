@@ -14,6 +14,13 @@ MAX_TOKENS = 512
 CONTEXT_CHARS = 40
 
 
+def mixed_precision(cpu):
+    if cpu:
+        return "fp32"
+    # Emulated bf16 support does not imply support for the CUDA GEMM used by TRL.
+    return "bf16" if torch.cuda.is_bf16_supported(including_emulation=False) else "fp16"
+
+
 def make_prompt(reading, left_context):
     context = "" if left_context is None else left_context[-CONTEXT_CHARS:]
     return f"左文脈：{context}\n読み：{reading}\n変換：\n"
@@ -110,7 +117,7 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(
         args.model, revision=revision, dtype=torch.float32, attn_implementation="sdpa"
     )
-    use_bf16 = not args.cpu and torch.cuda.is_bf16_supported()
+    precision = mixed_precision(args.cpu)
     trainer = SFTTrainer(
         model=model,
         processing_class=tokenizer,
@@ -124,8 +131,8 @@ def main():
             max_length=MAX_TOKENS,
             completion_only_loss=True,
             packing=False,
-            bf16=use_bf16,
-            fp16=not args.cpu and not use_bf16,
+            bf16=precision == "bf16",
+            fp16=precision == "fp16",
             use_cpu=args.cpu,
             gradient_checkpointing=True,
             optim="adamw_torch",
@@ -144,6 +151,7 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     metadata_path.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n")
     print(f"学習データ: {len(dataset)}件、実効バッチ: 32、周回数: {args.epochs}")
+    print(f"計算精度: {precision}")
     result = trainer.train(
         resume_from_checkpoint=str(args.resume_from) if args.resume_from else None
     )
