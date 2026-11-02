@@ -1,15 +1,32 @@
+"""CLI orchestration for full-parameter kana-kanji conversion training."""
+
 import argparse
 import hashlib
 import json
-from datetime import datetime
 from pathlib import Path
 
 import torch
-from datasets import Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
 from trl import SFTConfig, SFTTrainer
 
+from .checkpoints import resolve_run, valid_checkpoint
 from .prompting import CONTEXT_CHARS, MAX_TOKENS, make_prompt
+from .training_data import encode_example, prepare_dataset
+
+# Preserve helper imports for existing callers of the training module.
+__all__ = [
+    "CONTEXT_CHARS",
+    "MAX_TOKENS",
+    "MODEL_ID",
+    "MODEL_REVISION",
+    "encode_example",
+    "main",
+    "make_prompt",
+    "mixed_precision",
+    "prepare_dataset",
+    "resolve_run",
+    "valid_checkpoint",
+]
 
 MODEL_ID = "llm-jp/llm-jp-3-150m"
 MODEL_REVISION = "b112feef602fff752e4dac4c30af6a2c2fa41c7a"
@@ -20,94 +37,6 @@ def mixed_precision(cpu):
         return "fp32"
     # Emulated bf16 support does not imply support for the CUDA GEMM used by TRL.
     return "bf16" if torch.cuda.is_bf16_supported(including_emulation=False) else "fp16"
-
-
-def encode_example(row, tokenizer):
-    if not isinstance(row, dict):
-        raise TypeError("各行にはJSONオブジェクトが必要です。")
-    for name in ("input", "output"):
-        if not isinstance(row[name], str) or not row[name]:
-            raise ValueError(f"{name} は空でない文字列が必要です。")
-    if row["left_context"] is not None and not isinstance(row["left_context"], str):
-        raise ValueError("left_context は文字列またはnullが必要です。")
-    if tokenizer.eos_token_id is None:
-        raise ValueError("終了記号のあるtokenizerが必要です。")
-
-    prompt_ids = tokenizer.encode(make_prompt(row["input"], row["left_context"]))
-    answer_ids = tokenizer.encode(row["output"], add_special_tokens=False)
-    answer_ids.append(tokenizer.eos_token_id)
-    input_ids = prompt_ids + answer_ids
-    if len(input_ids) > MAX_TOKENS:
-        raise ValueError(
-            f"{len(input_ids)}トークンの例が上限{MAX_TOKENS}を超えました。"
-        )
-    return {
-        "input_ids": input_ids,
-        "completion_mask": [0] * len(prompt_ids) + [1] * len(answer_ids),
-    }
-
-
-def prepare_dataset(path, tokenizer):
-    examples = []
-    with path.open(encoding="utf-8") as stream:
-        for line_number, line in enumerate(stream, start=1):
-            try:
-                examples.append(encode_example(json.loads(line), tokenizer))
-            except (ValueError, KeyError, TypeError) as error:
-                raise ValueError(f"{path}:{line_number}: {error}") from error
-    if not examples:
-        raise ValueError("学習データが空です。")
-    return Dataset.from_list(examples)
-
-
-def resolve_run(output, resume=False, resume_from=None):
-    if resume_from is not None:
-        run = resume_from.parent
-        if output.resolve() not in (run.resolve(), run.parent.resolve()):
-            raise ValueError("resume-fromにはoutput内のcheckpointを指定してください。")
-        if not valid_checkpoint(resume_from):
-            raise ValueError("有効な再開用チェックポイントが見つかりません。")
-        return run, resume_from
-    if resume:
-        runs = sorted(path for path in output.glob("run-*") if path.is_dir())
-        if not runs:
-            raise ValueError("再開するrunが見つかりません。")
-        run = runs[-1]
-        if (run / "train_results.json").exists():
-            raise ValueError(f"最新のrunは完了済みです: {run}")
-        checkpoints = [
-            path
-            for path in run.glob("checkpoint-*")
-            if path.name.removeprefix("checkpoint-").isdigit()
-            and valid_checkpoint(path)
-        ]
-        if not checkpoints:
-            raise ValueError(f"最新のrunに有効なチェックポイントがありません: {run}")
-        return run, max(checkpoints, key=lambda path: int(path.name.split("-")[-1]))
-    run = output / f"run-{datetime.now():%Y%m%d-%H%M%S-%f}"
-    run.mkdir(parents=True, exist_ok=False)
-    return run, None
-
-
-def valid_checkpoint(path):
-    required = ("optimizer.pt", "scheduler.pt", "trainer_state.json", "config.json")
-    if not all((path / name).is_file() for name in required):
-        return False
-    weights = ("model.safetensors", "pytorch_model.bin")
-    indexes = ("model.safetensors.index.json", "pytorch_model.bin.index.json")
-    try:
-        json.loads((path / "trainer_state.json").read_text())
-        if any((path / name).is_file() for name in weights):
-            return True
-        for name in indexes:
-            if (path / name).is_file():
-                shards = json.loads((path / name).read_text())["weight_map"].values()
-                return bool(shards) and all(
-                    (path / shard).is_file() for shard in shards
-                )
-    except OSError, ValueError, KeyError, TypeError:
-        return False
-    return False
 
 
 def main():
