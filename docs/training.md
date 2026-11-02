@@ -25,6 +25,51 @@ JSONの破損やその他の入力検証エラーは除外せずに停止する�
 | 計算精度 | bf16ハードウェア対応GPUではbf16、それ以外のCUDA GPUではfp16 |
 | チェックポイント | 50更新ごと（`--save-steps`で変更）。最新2個を保持 |
 
+## 学習速度・VRAMのベンチマーク
+
+学習の基本設定は変更していない。速度を比較するため、次のCLIフラグを追加した。
+
+| フラグ | 既定値 | 意味 |
+| --- | --- | --- |
+| `--batch-size` | 32 | GPU上の1回のミニバッチ件数 |
+| `--gradient-accumulation-steps` | 1 | 勾配累積回数 |
+| `--train-sampling-strategy` | `random` | `group_by_length`で系列長の近い例をまとめ、パディングを削減 |
+| `--gradient-checkpointing` / `--no-gradient-checkpointing` | 有効 | 活性の再計算とVRAM使用量のトレードオフ |
+| `--optim` | `adamw_torch` | `adamw_torch_fused`でCUDA用fused AdamWを試す |
+| `--save-steps` | 50 | チェックポイント間隔。Drive書き込み頻度に影響 |
+
+**先に現在の既定設定でベースラインを測定する。** まず同じGPU、モデル、学習例、epoch数で学習する。学習結果の`train_results.json`にある`train_runtime`、`train_samples_per_second`、`peak_cuda_memory_gib`を記録する。新規実験は新しいrunに保存し、既存runを変更しない。
+
+例：ColabのT4で学習が始められる場合、次の設定を別々の新規runとして試す。いずれも**学習データ・周回数・学習率・実効バッチ32件は維持**する。短い計測では初回の環境構築やモデル取得時間を含めない。
+
+```bash
+# 1: ベースライン
+uv run --locked train --wikipedia-count 2500 --corpus-count 2500 --epochs 1 \
+  --output /content/drive/MyDrive/generic-zenzai-202611
+
+# 2: パディング削減
+uv run --locked train --wikipedia-count 2500 --corpus-count 2500 --epochs 1 \
+  --train-sampling-strategy group_by_length \
+  --output /content/drive/MyDrive/generic-zenzai-202611
+
+# 3: パディング削減 + optimizerのfused kernel
+uv run --locked train --wikipedia-count 2500 --corpus-count 2500 --epochs 1 \
+  --train-sampling-strategy group_by_length --optim adamw_torch_fused \
+  --output /content/drive/MyDrive/generic-zenzai-202611
+
+# 4: VRAMに収まればcheckpointingを無効化（T4ではOOMの場合あり）
+uv run --locked train --wikipedia-count 2500 --corpus-count 2500 --epochs 1 \
+  --train-sampling-strategy group_by_length --optim adamw_torch_fused \
+  --no-gradient-checkpointing \
+  --output /content/drive/MyDrive/generic-zenzai-202611
+```
+
+`--no-gradient-checkpointing`でメモリ不足になる場合は、`--batch-size 16 --gradient-accumulation-steps 2`または`--batch-size 8 --gradient-accumulation-steps 4`を試す。ただしミニバッチサイズ変更やデータ順序変更は、数値精度・更新方向・学習結果を厳密には同一にしない。AJIMEEの同一条件で精度を再評価する。
+
+チェックポイント保存に時間がかかる場合は`--save-steps 200`なども試せる。ただし停止時にやり直す更新数が増える。学習時間とColab切断リスクの双方で判断する。
+
+学習データの元ファイルはDriveから先頭部分を読み込む。run自体を`/content`に作り、終了後にDriveへ移すと保存I/Oを切り分けられるが、中断時のチェックポイントはColab側にしか残らないため、移動前のランタイム切断には注意する。
+
 開始時に計算精度を表示する。T4では`計算精度: fp16`になる。
 最初の更新時と以降10更新ごとに、`step 現在/全体 | loss: … | …`の形式で指標を表示する。
 終了時の学習損失・速度なども同じ形式で表示する。
