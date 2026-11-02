@@ -18,6 +18,7 @@ from transformers import (
     PreTrainedTokenizerFast,
 )
 
+from generic_zenzai_202611.checkpoints import remove_checkpoints
 from generic_zenzai_202611.config import MODEL_ID, MODEL_REVISION
 from generic_zenzai_202611.prepare import prepare_model
 from generic_zenzai_202611.train import (
@@ -163,6 +164,43 @@ class RunTest(unittest.TestCase):
             (checkpoint / "trainer_state.json").write_text("{")
             with self.assertRaises(ValueError):
                 resolve_run(output, resume_from=checkpoint)
+
+    def test_cleanup_only_removes_numeric_checkpoint_directories_in_this_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run = root / "run-001"
+            self.checkpoint(run, 1)
+            self.checkpoint(run, 2)
+            # Incomplete checkpoints left by a failed save are redundant too.
+            (run / "checkpoint-3").mkdir()
+            other = self.checkpoint(root / "run-002", 1)
+            (run / "checkpoint-4").symlink_to(other, target_is_directory=True)
+            (run / "checkpoint-5").touch()
+            preserved = (
+                run / "model" / "model.safetensors",
+                run / "ajimee" / "eval-001" / "scores.json",
+                run / "checkpoint-backup" / "notes.txt",
+                run / "run.json",
+                run / "train.jsonl",
+                run / "train_results.json",
+            )
+            for path in preserved:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("keep")
+            # Also preserve checkpoint-looking directories nested under the model.
+            nested = self.checkpoint(run / "model", 9)
+
+            remove_checkpoints(run)
+
+            for step in (1, 2, 3):
+                self.assertFalse((run / f"checkpoint-{step}").exists())
+            for path in preserved:
+                self.assertEqual(path.read_text(), "keep")
+            self.assertTrue((other / "optimizer.pt").is_file())
+            self.assertTrue((nested / "optimizer.pt").is_file())
+            self.assertTrue((run / "checkpoint-4").is_symlink())
+            self.assertTrue((run / "checkpoint-5").is_file())
+            remove_checkpoints(run)  # Repeating cleanup is harmless.
 
 
 class PrecisionTest(unittest.TestCase):
@@ -379,8 +417,7 @@ class TrainingTest(unittest.TestCase):
             self.assertEqual(metrics["precision"], "fp32")
             self.assertEqual(metrics["effective_batch_size"], 32)
             self.assertTrue(math.isfinite(metrics["train_loss"]))
-            checkpoint = output / "checkpoint-2"
-            self.assertTrue((checkpoint / "optimizer.pt").is_file())
+            self.assertEqual(list(output.glob("checkpoint-*")), [])
 
             # Automatic resume must not restart a completed run.
             repeated = subprocess.run(
@@ -394,10 +431,75 @@ class TrainingTest(unittest.TestCase):
             )
             self.assertNotEqual(repeated.returncode, 0)
             self.assertIn("完了済み", repeated.stderr)
-            # Simulate interruption after checkpoint save but before final metrics.
-            (output / "train_results.json").unlink()
+            # Interrupt real training after its first checkpoint has been saved.
+            interrupted_parent = root / "interrupted-runs"
+            interrupted_command = command + ["--output", str(interrupted_parent)]
+            interrupted = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "from generic_zenzai_202611 import train\n"
+                        "class Interrupt(train.TrainingLogCallback):\n"
+                        "    def on_save(self, *args, **kwargs):\n"
+                        "        raise RuntimeError('injected training interruption')\n"
+                        "train.TrainingLogCallback = Interrupt\n"
+                        "train.main()\n"
+                    ),
+                    *interrupted_command[1:],
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=root,
+                timeout=120,
+            )
+            self.assertNotEqual(interrupted.returncode, 0)
+            self.assertIn("injected training interruption", interrupted.stderr)
+            interrupted_run = next(interrupted_parent.glob("run-*"))
+            self.assertTrue(
+                (interrupted_run / "checkpoint-1" / "optimizer.pt").is_file()
+            )
+            self.assertFalse((interrupted_run / "train_results.json").exists())
+            self.assertEqual(exported_model.read_text(encoding="utf-8"), "")
+
+            # Final artifact save failures must also keep the resumable state.
+            save_failed = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "from unittest.mock import patch\n"
+                        "from generic_zenzai_202611 import train\n"
+                        "with patch.object(train.SFTTrainer, 'save_metrics', "
+                        "side_effect=OSError('injected metrics save failure')):\n"
+                        "    train.main()\n"
+                    ),
+                    *interrupted_command[1:],
+                    "--resume",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=root,
+                timeout=120,
+            )
+            self.assertNotEqual(save_failed.returncode, 0)
+            self.assertIn("injected metrics save failure", save_failed.stderr)
+            self.assertTrue(
+                (interrupted_run / "checkpoint-2" / "optimizer.pt").is_file()
+            )
+            self.assertFalse((interrupted_run / "train_results.json").exists())
+            self.assertEqual(exported_model.read_text(encoding="utf-8"), "")
+
+            # Keep existing evaluation results when finishing this run.
+            scores_path = interrupted_run / "ajimee" / "eval-existing" / "scores.json"
+            scores_path.parent.mkdir(parents=True)
+            scores_path.write_text('{"accuracy_at1": 0.5}\n')
             resumed = subprocess.run(
-                command + ["--resume", "--epochs", "2"],
+                interrupted_command + ["--resume", "--epochs", "2"],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -406,13 +508,14 @@ class TrainingTest(unittest.TestCase):
                 timeout=120,
             )
             self.assertEqual(resumed.returncode, 0, resumed.stdout + resumed.stderr)
-            state = json.loads(
-                (output / "checkpoint-4" / "trainer_state.json").read_text()
-            )
+            state = json.loads((interrupted_run / "train_results.json").read_text())
             self.assertEqual(state["global_step"], 4)
+            self.assertEqual(list(interrupted_run.glob("checkpoint-*")), [])
+            self.assertEqual(scores_path.read_text(), '{"accuracy_at1": 0.5}\n')
+            self.assertTrue((interrupted_run / "model" / "tokenizer.json").is_file())
             self.assertEqual(
                 exported_model.read_text(encoding="utf-8"),
-                str((output / "model").resolve()) + "\n",
+                str((interrupted_run / "model").resolve()) + "\n",
             )
 
             # A failed new training must not leave the previous model exported.

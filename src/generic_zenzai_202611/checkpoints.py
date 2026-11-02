@@ -1,6 +1,7 @@
 """Training run creation and resumable checkpoint validation."""
 
 import json
+import shutil
 from datetime import datetime
 
 
@@ -31,6 +32,19 @@ def resolve_run(output, resume=False, resume_from=None):
     run = output / f"run-{datetime.now():%Y%m%d-%H%M%S-%f}"
     run.mkdir(parents=True, exist_ok=False)
     return run, None
+
+
+def remove_checkpoints(run):
+    """Remove only this completed run's direct, non-symlink checkpoint directories."""
+    run = run.resolve()
+    for path in run.glob("checkpoint-*"):
+        if (
+            path.name.removeprefix("checkpoint-").isdigit()
+            and not path.is_symlink()
+            and path.is_dir()
+            and path.resolve().parent == run
+        ):
+            shutil.rmtree(path)
 
 
 def valid_checkpoint(path):

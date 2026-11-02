@@ -10,7 +10,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback, s
 from transformers.trainer_callback import PrinterCallback
 from trl import SFTConfig, SFTTrainer
 
-from .checkpoints import resolve_run, valid_checkpoint
+from .checkpoints import remove_checkpoints, resolve_run, valid_checkpoint
 from .config import DATASET_DIR, MODEL_DIR, MODEL_ID, MODEL_REVISION
 from .generate_data import generate_train_jsonl
 from .prepare import prepare_model
@@ -214,4 +214,6 @@ def main():
     model_path.write_text(
         str((args.output / "model").resolve()) + "\n", encoding="utf-8"
     )
+    # Keep resumable state until every final artifact has been saved successfully.
+    remove_checkpoints(args.output)
     print(f"学習済みモデル: {args.output / 'model'}", flush=True)
