@@ -38,48 +38,62 @@ JSONの破損やその他の入力検証エラーは除外せずに停止する�
 
 ## 学習速度・VRAMのベンチマーク
 
-学習の基本設定は変更していない。速度を比較するため、次のCLIフラグを追加した。
+### 測定済みの基準値
 
-| フラグ | 既定値 | 意味 |
+[PR #1のコメント](https://github.com/ph0ryn/generic-zenzai-202611/pull/1#issuecomment-6582714831)で共有された、**同じColabランタイムとGPU**を使った既存の比較結果。学習データは同一の5,000件（SHA-256一致）、1 epoch、fp16、seed 42、実効バッチ32、157更新で揃えている。
+
+| ミニバッチ × 累積 | 学習時間 | 処理速度 |
+| --- | ---: | ---: |
+| 8 × 4（1回目） | 143.4秒 | 34.9件/秒 |
+| 8 × 4（2回目） | 140.0秒 | 35.7件/秒 |
+| 16 × 2 | 119.7秒 | 41.8件/秒 |
+| **32 × 1（既定）** | **98.8秒** | **50.6件/秒** |
+
+バッチサイズを増やす比較は**既に実施済み**。最速の32×1を既定値に採用している。現時点で、これらの実行のピークVRAM記録はない。
+
+同条件のAJIMEE評価では16×2から32×1への変更で完全一致3/200→2/200、平均MinCER 0.6297→0.6313だった。ただし各条件の単一評価であり、精度差の傾向を断定できない。
+
+### 追加した実験オプション
+
+このPRで追加したものは、まだColab GPUで速度向上を実証していない。既定の学習設定は変更しない。
+
+| フラグ | 既定値 | 比較する仮説 |
 | --- | --- | --- |
-| `--batch-size` | 32 | GPU上の1回のミニバッチ件数 |
-| `--gradient-accumulation-steps` | 1 | 勾配累積回数 |
-| `--train-sampling-strategy` | `random` | `group_by_length`で系列長の近い例をまとめ、パディングを削減 |
-| `--gradient-checkpointing` / `--no-gradient-checkpointing` | 有効 | 活性の再計算とVRAM使用量のトレードオフ |
-| `--optim` | `adamw_torch` | `adamw_torch_fused`でCUDA用fused AdamWを試す |
-| `--save-steps` | 50 | チェックポイント間隔。Drive書き込み頻度に影響 |
+| `--train-sampling-strategy` | `random` | `group_by_length`で同じ長さの系列をまとめ、バッチ内のpaddingを減らす |
+| `--optim` | `adamw_torch` | `adamw_torch_fused`でoptimizerの処理を短縮する |
+| `--gradient-checkpointing` / `--no-gradient-checkpointing` | 有効 | 再計算を減らす代わりにGPUメモリ消費が増える |
+| `--batch-size` / `--gradient-accumulation-steps` | 32 / 1 | OOM時のフォールバック用。速度改善を再提案するものではない |
 
-**先に現在の既定設定でベースラインを測定する。** まず同じGPU、モデル、学習例、epoch数で学習する。学習結果の`train_results.json`にある`train_runtime`、`train_samples_per_second`、`peak_cuda_memory_gib`を記録する。新規実験は新しいrunに保存し、既存runを変更しない。
+今後の新規runでは`train_results.json`にGPU名・ピークCUDAメモリのreserved/allocated・学習データの系列長合計を追加して記録する。CUDAメモリ測定は学習開始直前にリセットし、**学習の終了直後、モデル最終保存前**に確定させる。
 
-例：ColabのT4で学習が始められる場合、次の設定を別々の新規runとして試す。いずれも**学習データ・周回数・学習率・実効バッチ32件は維持**する。短い計測では初回の環境構築やモデル取得時間を含めない。
+### 追加実験の実行例
+
+**32×1の既存計測（98.8秒）をベースライン**にして、各設定を単独で試す。過去runの速度と比べる際はGPU種類・依存パッケージのバージョン・学習データハッシュ・周回数・保存間隔などの違いに注意する。最新環境で厳密な比較が必要な場合だけ、32×1の既定設定を再測定する。
+
+Colabで5,000件・1 epochを新規runに保存する例（上から全てを実施する必要はない）。
 
 ```bash
-# 1: ベースライン
-uv run --locked train --wikipedia-count 2500 --corpus-count 2500 --epochs 1 \
-  --output /content/drive/MyDrive/generic-zenzai-202611
-
-# 2: パディング削減
+# A: paddingを削減する。その他は32×1の既定設定。
 uv run --locked train --wikipedia-count 2500 --corpus-count 2500 --epochs 1 \
   --train-sampling-strategy group_by_length \
   --output /content/drive/MyDrive/generic-zenzai-202611
 
-# 3: パディング削減 + optimizerのfused kernel
+# B: fused AdamWだけを変更する。
 uv run --locked train --wikipedia-count 2500 --corpus-count 2500 --epochs 1 \
-  --train-sampling-strategy group_by_length --optim adamw_torch_fused \
+  --optim adamw_torch_fused \
   --output /content/drive/MyDrive/generic-zenzai-202611
 
-# 4: VRAMに収まればcheckpointingを無効化（T4ではOOMの場合あり）
+# C: gradient checkpointingだけを無効化する（T4ではOOMの可能性）。
 uv run --locked train --wikipedia-count 2500 --corpus-count 2500 --epochs 1 \
-  --train-sampling-strategy group_by_length --optim adamw_torch_fused \
   --no-gradient-checkpointing \
   --output /content/drive/MyDrive/generic-zenzai-202611
 ```
 
-`--no-gradient-checkpointing`でメモリ不足になる場合は、`--batch-size 16 --gradient-accumulation-steps 2`または`--batch-size 8 --gradient-accumulation-steps 4`を試す。ただしミニバッチサイズ変更やデータ順序変更は、数値精度・更新方向・学習結果を厳密には同一にしない。AJIMEEの同一条件で精度を再評価する。
+すべて元のモデルから学習を始め、既存runを上書きしない。各実験は同一データの`data_sha256`、同じ実効バッチ32・seed・学習率で比較する。学習時に系列の並びが変わったり、optimizerの演算が変わったりするため、完全に同一の更新を保証する比較ではない。高速化できてもAJIMEEの完全一致率とMinCERを確認する。
 
-チェックポイント保存に時間がかかる場合は`--save-steps 200`なども試せる。ただし停止時にやり直す更新数が増える。学習時間とColab切断リスクの双方で判断する。
+`--no-gradient-checkpointing`でOOMになる場合は無理に32×1で続けず、この条件は不採用にする。バッチ16×累積2への変更は別条件になり、速度の単独要因比較には使えない。
 
-学習データの元ファイルはDriveから先頭部分を読み込む。run自体を`/content`に作り、終了後にDriveへ移すと保存I/Oを切り分けられるが、中断時のチェックポイントはColab側にしか残らないため、移動前のランタイム切断には注意する。
+Driveへのcheckpoint保存がボトルネックなら、**別実験**で`--save-steps 200`などを試す。書き込み回数を減らせる反面、Colab切断時に再実行する更新数が増える。作成したrunを`/content`に保存して終了後にDriveへコピーする方法もあるが、コピー前の切断でデータを失うリスクがあるため、実験中のDrive保存とのトレードオフを判断する。
 
 ## 保存先
 
