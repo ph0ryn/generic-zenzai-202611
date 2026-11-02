@@ -355,13 +355,13 @@ class TrainingTest(unittest.TestCase):
             self.assertGreater(tokens.shape[-1], inputs.input_ids.shape[-1])
             metadata = json.loads((output / "run.json").read_text())
             self.assertEqual(metadata["examples"], 34)
-            self.assertEqual(metadata["batch_size"], 8)
-            self.assertEqual(metadata["gradient_accumulation"], 4)
+            self.assertEqual(metadata["batch_size"], 16)
+            self.assertEqual(metadata["gradient_accumulation"], 2)
             training_args = torch.load(
                 output / "model" / "training_args.bin", weights_only=False
             )
-            self.assertEqual(training_args.per_device_train_batch_size, 8)
-            self.assertEqual(training_args.gradient_accumulation_steps, 4)
+            self.assertEqual(training_args.per_device_train_batch_size, 16)
+            self.assertEqual(training_args.gradient_accumulation_steps, 2)
             self.assertEqual(
                 len((output / "train.jsonl").read_text(encoding="utf-8").splitlines()),
                 34,

@@ -129,8 +129,8 @@ def main():
         "max_tokens": MAX_TOKENS,
         "context_chars": CONTEXT_CHARS,
         "learning_rate": 5e-5,
-        "batch_size": 8,
-        "gradient_accumulation": 4,
+        "batch_size": 16,
+        "gradient_accumulation": 2,
         "seed": 42,
     }
     metadata_path = args.output / "run.json"
