@@ -108,6 +108,60 @@ class RunTest(unittest.TestCase):
                 resolve_run(output, resume=True)
             self.assertEqual(sorted(output.iterdir()), before)
 
+    def test_resume_accepts_each_supported_weight_format(self):
+        for name, sharded in (
+            ("model.safetensors", False),
+            ("pytorch_model.bin", False),
+            ("model.safetensors.index.json", True),
+            ("pytorch_model.bin.index.json", True),
+        ):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory)
+                checkpoint = self.checkpoint(output / "run-001", 1)
+                (checkpoint / "model.safetensors").unlink()
+                if sharded:
+                    (checkpoint / name).write_text(
+                        json.dumps({"weight_map": {"layer": "shard-001"}})
+                    )
+                    (checkpoint / "shard-001").touch()
+                else:
+                    (checkpoint / name).touch()
+                self.assertEqual(
+                    resolve_run(output, resume=True), (checkpoint.parent, checkpoint)
+                )
+
+    def test_resume_rejects_incomplete_or_invalid_checkpoint_metadata(self):
+        for contents, shard_exists in (
+            ("{", True),
+            ("{}", True),
+            ('{"weight_map": {}}', True),
+            ('{"weight_map": {"layer": "shard-001"}}', False),
+        ):
+            with (
+                self.subTest(contents=contents),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                output = Path(directory)
+                checkpoint = self.checkpoint(output / "run-001", 1)
+                (checkpoint / "model.safetensors").unlink()
+                (checkpoint / "model.safetensors.index.json").write_text(contents)
+                if shard_exists:
+                    (checkpoint / "shard-001").touch()
+                with self.assertRaises(ValueError):
+                    resolve_run(output, resume_from=checkpoint)
+                with self.assertRaises(ValueError):
+                    resolve_run(output, resume=True)
+
+    def test_explicit_resume_rejects_unrelated_output_and_invalid_trainer_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            checkpoint = self.checkpoint(output / "run-001", 1)
+            with self.assertRaises(ValueError):
+                resolve_run(output / "other", resume_from=checkpoint)
+            (checkpoint / "trainer_state.json").write_text("{")
+            with self.assertRaises(ValueError):
+                resolve_run(output, resume_from=checkpoint)
+
 
 class PrecisionTest(unittest.TestCase):
     def test_precision_requires_native_bf16_support(self):
@@ -168,6 +222,26 @@ class DataTest(unittest.TestCase):
                 encode_example({**self.row, **change}, self.tokenizer)
         with self.assertRaises(KeyError):
             encode_example({"input": "アツイ", "output": "熱い"}, self.tokenizer)
+
+    def test_jsonl_errors_include_path_and_physical_line_number(self):
+        invalid_rows = ("{", "null", json.dumps({"input": "アツイ"}))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "train.jsonl"
+            first = json.dumps(self.row, ensure_ascii=False) + "\n"
+            for invalid in invalid_rows:
+                with self.subTest(invalid=invalid):
+                    path.write_text(first + invalid + "\n", encoding="utf-8")
+                    with self.assertRaises(ValueError) as raised:
+                        prepare_dataset(path, self.tokenizer)
+                    self.assertIn(f"{path}:2:", str(raised.exception))
+                    self.assertIsNotNone(raised.exception.__cause__)
+
+    def test_empty_jsonl_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "train.jsonl"
+            path.touch()
+            with self.assertRaisesRegex(ValueError, "学習データが空"):
+                prepare_dataset(path, self.tokenizer)
 
     def test_context_uses_last_40_characters(self):
         self.assertEqual(
