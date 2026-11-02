@@ -251,6 +251,95 @@ class DataTest(unittest.TestCase):
 
 
 class TrainingTest(unittest.TestCase):
+    def test_cli_nondefault_performance_options_on_cpu(self):
+        # Exercise actual Trainer construction, length grouping, and the
+        # no-checkpointing path without needing a GPU or Hub download.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            base = root / "base"
+            tokenizer = make_tokenizer()
+            tokenizer.save_pretrained(base)
+            model = LlamaForCausalLM(
+                LlamaConfig(
+                    vocab_size=len(tokenizer),
+                    hidden_size=16,
+                    intermediate_size=32,
+                    num_hidden_layers=1,
+                    num_attention_heads=2,
+                    num_key_value_heads=2,
+                    max_position_embeddings=512,
+                    eos_token_id=tokenizer.eos_token_id,
+                    pad_token_id=tokenizer.pad_token_id,
+                )
+            )
+            model.save_pretrained(base)
+
+            sources = root / "dataset"
+            sources.mkdir()
+            for name, row in (
+                (
+                    "train_wikipedia.jsonl",
+                    {"input": "アツイ", "output": "熱い", "left_context": "お湯に触れた。"},
+                ),
+                (
+                    "train_llm-jp-corpus-v3.jsonl",
+                    {"input": "アツイ", "output": "暑い", "left_context": None},
+                ),
+            ):
+                (sources / name).write_text(
+                    (json.dumps(row, ensure_ascii=False) + "\\n") * 2,
+                    encoding="utf-8",
+                )
+
+            output = root / "runs"
+            command = [
+                str(Path(sys.executable).with_name("train")),
+                "--model", str(base),
+                "--dataset-dir", str(sources),
+                "--wikipedia-count", "2",
+                "--corpus-count", "2",
+                "--output", str(output),
+                "--batch-size", "2",
+                "--gradient-accumulation-steps", "2",
+                "--train-sampling-strategy", "group_by_length",
+                "--no-gradient-checkpointing",
+                "--cpu",
+                "--save-steps", "1",
+            ]
+            env = {
+                **os.environ,
+                "HF_HUB_OFFLINE": "1",
+                "TOKENIZERS_PARALLELISM": "false",
+                "OMP_NUM_THREADS": "1",
+            }
+            result = subprocess.run(
+                command, cwd=root, env=env, capture_output=True, text=True,
+                check=False, timeout=120,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            run = next(output.glob("run-*"))
+            metadata = json.loads((run / "run.json").read_text())
+            self.assertEqual(metadata["batch_size"], 2)
+            self.assertEqual(metadata["gradient_accumulation"], 2)
+            self.assertEqual(metadata["train_sampling_strategy"], "group_by_length")
+            self.assertFalse(metadata["gradient_checkpointing"])
+            metrics = json.loads((run / "train_results.json").read_text())
+            self.assertEqual(metrics["effective_batch_size"], 4)
+            self.assertEqual(metrics["global_step"], 1)
+            self.assertEqual(metrics["device_name"], "cpu")
+            self.assertNotIn("peak_cuda_memory_gib", metrics)
+            self.assertGreater(metrics["dataset_tokens"], 0)
+
+            # Invalid batch sizes should fail before any run is created.
+            invalid = subprocess.run(
+                command + ["--batch-size", "0"],
+                cwd=root, env=env, capture_output=True, text=True,
+                check=False, timeout=30,
+            )
+            self.assertNotEqual(invalid.returncode, 0)
+            self.assertIn("batch-size", invalid.stderr)
+            self.assertEqual(len(list(output.glob("run-*"))), 1)
+
     def test_cli_trains_saves_reloads_and_resumes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
