@@ -76,6 +76,25 @@ def main():
     )
     parser.add_argument("--epochs", type=float, default=1)
     parser.add_argument("--save-steps", type=int, default=50)
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--gradient-accumulation-steps", type=int, default=1)
+    parser.add_argument(
+        "--train-sampling-strategy",
+        choices=("random", "group_by_length"),
+        default="random",
+        help="同じ長さの系列をまとめ、バッチ内のpaddingを減らす",
+    )
+    parser.add_argument(
+        "--gradient-checkpointing",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="活性を再計算してGPUメモリを節約する",
+    )
+    parser.add_argument(
+        "--optim",
+        choices=("adamw_torch", "adamw_torch_fused"),
+        default="adamw_torch",
+    )
     resuming = parser.add_mutually_exclusive_group()
     resuming.add_argument("--resume", action="store_true", help="最新runから再開")
     resuming.add_argument(
@@ -85,6 +104,8 @@ def main():
     args = parser.parse_args()
     if args.epochs <= 0 or args.save_steps <= 0:
         parser.error("epochsとsave-stepsは正の値を指定してください。")
+    if args.batch_size <= 0 or args.gradient_accumulation_steps <= 0:
+        parser.error("batch-sizeとgradient-accumulation-stepsは正の整数を指定してください。")
     if min(args.wikipedia_count, args.corpus_count) < 0 or not (
         args.wikipedia_count + args.corpus_count
     ):
@@ -121,6 +142,12 @@ def main():
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     dataset = prepare_dataset(data_path, tokenizer)
+    lengths = [len(ids) for ids in dataset["input_ids"]]
+    print(
+        f"系列長: 最小{min(lengths)} / 平均{sum(lengths) / len(lengths):.1f}"
+        f" / 最大{max(lengths)}トークン",
+        flush=True,
+    )
     settings = {
         "model": args.model,
         "revision": revision,
@@ -129,8 +156,11 @@ def main():
         "max_tokens": MAX_TOKENS,
         "context_chars": CONTEXT_CHARS,
         "learning_rate": 5e-5,
-        "batch_size": 32,
-        "gradient_accumulation": 1,
+        "batch_size": args.batch_size,
+        "gradient_accumulation": args.gradient_accumulation_steps,
+        "train_sampling_strategy": args.train_sampling_strategy,
+        "gradient_checkpointing": args.gradient_checkpointing,
+        "optimizer": args.optim,
         "seed": 42,
     }
     metadata_path = args.output / "run.json"
@@ -139,6 +169,15 @@ def main():
             original_settings = json.loads(metadata_path.read_text())
         except (OSError, ValueError) as error:
             parser.error(f"再開用のrun.jsonを読み込めません: {error}")
+        if not isinstance(original_settings, dict):
+            parser.error("再開用のrun.jsonはJSONオブジェクトである必要があります。")
+        # Runs created before performance options existed use these defaults.
+        for name, default in (
+            ("train_sampling_strategy", "random"),
+            ("gradient_checkpointing", True),
+            ("optimizer", "adamw_torch"),
+        ):
+            original_settings.setdefault(name, default)
         if original_settings != settings:
             parser.error(
                 "元の実行とモデル・データ・学習設定が異なるため再開できません。"
@@ -158,14 +197,15 @@ def main():
             learning_rate=settings["learning_rate"],
             per_device_train_batch_size=settings["batch_size"],
             gradient_accumulation_steps=settings["gradient_accumulation"],
+            train_sampling_strategy=settings["train_sampling_strategy"],
             max_length=MAX_TOKENS,
             completion_only_loss=True,
             packing=False,
             bf16=precision == "bf16",
             fp16=precision == "fp16",
             use_cpu=args.cpu,
-            gradient_checkpointing=True,
-            optim="adamw_torch",
+            gradient_checkpointing=settings["gradient_checkpointing"],
+            optim=settings["optimizer"],
             warmup_steps=0.05,
             logging_steps=10,
             logging_first_step=True,
@@ -194,6 +234,8 @@ def main():
         flush=True,
     )
     print(f"計算精度: {precision}", flush=True)
+    if not args.cpu:
+        torch.cuda.reset_peak_memory_stats()
     result = trainer.train(
         resume_from_checkpoint=str(args.resume_from) if args.resume_from else None
     )
@@ -204,6 +246,11 @@ def main():
         precision=precision,
         effective_batch_size=effective_batch_size,
     )
+    result.metrics["dataset_tokens"] = sum(lengths)
+    if not args.cpu:
+        peak_gib = torch.cuda.max_memory_reserved() / 1024**3
+        result.metrics["peak_cuda_memory_gib"] = round(peak_gib, 3)
+        print(f"最大GPU予約メモリ: {peak_gib:.2f} GiB", flush=True)
     trainer.save_metrics("train", result.metrics)
     model_path.write_text(
         str((args.output / "model").resolve()) + "\n", encoding="utf-8"
