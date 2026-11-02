@@ -1,16 +1,16 @@
 # generic-zenzai-202611
 
 LLM-jp-3-150mを、文脈と読みからかな漢字変換するモデルに追加学習する。
-uvで環境を固定し、ColabからCLIで学習を実行する。
+uvで環境を固定し、ColabからCLIで学習とAJIMEE-Bench評価を実行する。
 
-## Colabで学習
+## 学習
 
 Colabで新規ノートブックを作る。
 ランタイムをGPUに変更し、以下の3ブロックを別々のセルにコピーして、
 上から順に実行する。
 
 ```python
-!git clone https://github.com/ph0ryn/generic-zenzai-202611.git
+!git clone --recurse-submodules https://github.com/ph0ryn/generic-zenzai-202611.git
 %cd /content/generic-zenzai-202611
 %pip install uv==0.13.4
 !uv sync --locked
@@ -50,13 +50,77 @@ GPUの種類、VRAM、残りのコンピュートユニットは実行時に確�
 文脈がないデータも2,500件含む。
 開始時に計算精度を表示する。T4では`計算精度: fp16`になる。
 学習中の`loss`は正解の予測誤差であり、変換精度そのものではない。
-まず学習と保存を完了し、その後にAJIMEEで評価する。
-このプロジェクトには評価データの作成・評価実行を含めていない。
+まず学習と保存を完了し、その後に下記のコマンドでAJIMEE評価を実行する。
+評価は学習と別プロセスなので、評価の失敗で学習をやり直す必要はない。
 
 モデルのrevisionは
 `b112feef602fff752e4dac4c30af6a2c2fa41c7a`に固定。
 出典は[LLM-jpのモデルカード](https://huggingface.co/llm-jp/llm-jp-3-150m)。
 データの出典・ライセンス・品質上の制限は[data/README.md](data/README.md)を参照。
+
+## AJIMEE評価
+
+学習の最後に表示された`学習済みモデル:`のパスを、次のセルの`model`に指定する。
+`run-実際の日時`は実際のディレクトリ名に置き換える。同じGPUランタイムで実行できる。
+モデルやtokenizerはローカル保存済みのものだけを読み、評価中のダウンロードは行わない。
+
+```python
+model = "/content/drive/MyDrive/generic-zenzai-202611/run-実際の日時/model"
+!uv run --locked generic-zenzai-evaluate --model "{model}"
+```
+
+既存のcloneでsubmoduleが未初期化なら、先に次を実行する。
+親repoの更新後も、このコマンドで記録されたcommitに合わせる。`--remote`は付けない。
+
+```python
+!git submodule update --init
+```
+
+### 評価条件と指標
+
+[AJIMEE-Bench](https://github.com/azooKey/AJIMEE-Bench)の`JWTD_v2/v1`を使う。
+評価データはこのrepoへコピーせず、[submodule](<benchmarks/AJIMEE-Bench>)として参照する。
+初期の参照commitは`401666cd56d1a570c2021798b64b6da4396bfd45`。
+Gitが参照commitを固定し、更新はsubmoduleの参照変更として管理する。
+未初期化や評価データの未commit変更はエラー終了する。
+
+- 全200件を、文脈あり100件・なし100件に分けても集計する。
+- 学習と同じプロンプトを使い、左文脈は末尾40文字。読みは分割せず全文を入力する。
+- 1件ずつ、fp32・greedy（サンプリングなし、beam数1）で生成する。
+  生成上限は128トークン。EOSで終了しなかった件数も記録する。
+- 入力＋生成上限が512トークンまたはモデルの位置上限を超える場合は停止する。
+  データを除外したり、読みを切り詰めたりはしない。`--max-new-tokens`で上限を変更できる。
+- 完全一致率は、生成結果が許容解のいずれかと一致した割合。
+  MinCERは各許容解への文字誤り率の最小値で、集計値はその項目ごとの単純平均。
+  空白除去や表記の正規化は行わない。生成の特殊トークンのみ除去する。
+
+これは**モデル単体のかな漢字変換評価**であり、Zenzaiの辞書・探索・読み制約・量子化を
+含むIME全体の評価ではない。ベースモデルを比較するときは、学習データ・文脈条件・
+生成上限を揃える。速度の実機ベンチマークは含まない。
+
+### 評価結果
+
+既定では指定モデルの隣の`ajimee/eval-日時/`に保存する。Colabの例ではDrive上になる。
+`--output`で保存先の親ディレクトリを変更でき、毎回新規ディレクトリを作る。
+
+- `predictions.jsonl`: 各項目のID・読み・文脈・許容解・予測・採点・生成上限到達の有無。
+  1件ごとに保存する。
+- `scores.json`: 全体・文脈あり・文脈なしの件数、完全一致率、平均MinCER。
+  全件成功時のみ保存し、このファイルが評価完了の目印になる。
+- `evaluation.json`: モデルのパス、実際のベンチcommitとデータのSHA-256、
+  プロンプト・生成条件・デバイス・ライブラリバージョン。
+
+評価途中で切断した場合も途中結果は残る。評価の再開機能はなく、同じコマンドで全件を
+新しいディレクトリへ再評価する。入力データ本体のコピーは保存しない。
+
+ローカルでも同じCLIを使える。GPUなしなら`--cpu`を指定する。
+別のAJIMEE checkoutを使う場合は`--benchmark /path/to/AJIMEE-Bench`を指定する。
+
+評価データの出典はazooKeyのAJIMEE-Benchと、京都大学の
+[日本語Wikipedia入力誤りデータセット(v2)](https://nlp.ist.i.kyoto-u.ac.jp/?日本語Wikipedia入力誤りデータセット)。
+データはCC BY-SA 3.0、公式の採点コードはCC0 1.0 Universal。
+詳細は[上流の出典・ライセンス説明](<benchmarks/AJIMEE-Bench/README.md>)を参照。
+許容解などを含む評価結果を再配布するときも、データの出典・ライセンスを維持する。
 
 ## 保存と再開
 
@@ -96,5 +160,14 @@ uv run task test
 
 テストはダウンロード不要の小さなモデルをCPUで実際に学習し、
 重みの更新・保存・推論・再開・出力先の分離・再開できない場合の終了を確認する。
-通常の学習コマンドにはCUDA GPUが必要。
-`--cpu`は小規模な動作確認用。
+評価CLIも、小さなモデルと合成した評価データで実際の生成・採点・保存・異常終了を確認する。
+上流のデータやモデルのダウンロードはテストに不要。
+通常の学習コマンドにはCUDA GPUが必要。学習の`--cpu`は小規模な動作確認用。
+
+処理は次の責務で分割している。
+
+- [train.py](<src/generic_zenzai_202611/train.py>): 学習と再開。
+- [prompting.py](<src/generic_zenzai_202611/prompting.py>): 学習・評価共通のプロンプト。
+- [inference.py](<src/generic_zenzai_202611/inference.py>): 保存済みモデルの読み込みと生成。
+- [benchmark.py](<src/generic_zenzai_202611/benchmark.py>): ベンチデータの検証と採点。
+- [evaluate.py](<src/generic_zenzai_202611/evaluate.py>): 評価CLIと結果保存。

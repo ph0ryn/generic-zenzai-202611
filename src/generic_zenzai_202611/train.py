@@ -9,10 +9,10 @@ from datasets import Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
 from trl import SFTConfig, SFTTrainer
 
+from .prompting import CONTEXT_CHARS, MAX_TOKENS, make_prompt
+
 MODEL_ID = "llm-jp/llm-jp-3-150m"
 MODEL_REVISION = "b112feef602fff752e4dac4c30af6a2c2fa41c7a"
-MAX_TOKENS = 512
-CONTEXT_CHARS = 40
 
 
 def mixed_precision(cpu):
@@ -20,11 +20,6 @@ def mixed_precision(cpu):
         return "fp32"
     # Emulated bf16 support does not imply support for the CUDA GEMM used by TRL.
     return "bf16" if torch.cuda.is_bf16_supported(including_emulation=False) else "fp16"
-
-
-def make_prompt(reading, left_context):
-    context = "" if left_context is None else left_context[-CONTEXT_CHARS:]
-    return f"左文脈：{context}\n読み：{reading}\n変換：\n"
 
 
 def encode_example(row, tokenizer):
