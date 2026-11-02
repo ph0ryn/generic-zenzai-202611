@@ -357,6 +357,9 @@ class TrainingTest(unittest.TestCase):
             self.assertEqual(metadata["examples"], 34)
             self.assertEqual(metadata["batch_size"], 32)
             self.assertEqual(metadata["gradient_accumulation"], 1)
+            self.assertEqual(metadata["train_sampling_strategy"], "random")
+            self.assertTrue(metadata["gradient_checkpointing"])
+            self.assertEqual(metadata["optimizer"], "adamw_torch")
             training_args = torch.load(
                 output / "model" / "training_args.bin", weights_only=False
             )
@@ -370,6 +373,14 @@ class TrainingTest(unittest.TestCase):
             self.assertEqual(metrics["global_step"], 2)
             self.assertEqual(metrics["precision"], "fp32")
             self.assertEqual(metrics["effective_batch_size"], 32)
+            self.assertEqual(metrics["dataset_tokens"], sum(
+                len(encode_example(row, restored_tokenizer)["input_ids"])
+                for row in (
+                    {"input": "アツイ", "output": "熱い", "left_context": "お湯に触れた。"},
+                    {"input": "アツイ", "output": "暑い", "left_context": None},
+                )
+                for _ in range(17)
+            ))
             self.assertTrue(math.isfinite(metrics["train_loss"]))
             checkpoint = output / "checkpoint-2"
             self.assertTrue((checkpoint / "optimizer.pt").is_file())
