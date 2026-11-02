@@ -11,6 +11,7 @@ import transformers
 from .benchmark import load_benchmark, score_prediction, summarize
 from .inference import Converter
 from .prompting import CONTEXT_CHARS, PROMPT_TEMPLATE
+from .summary import read_training, write_summary
 
 
 def main():
@@ -38,6 +39,7 @@ def main():
         parser.error("max-new-tokensは正の整数を指定してください。")
     try:
         items, benchmark = load_benchmark(args.benchmark)
+        training = read_training(args.model.resolve())
         converter = Converter(
             args.model, cpu=args.cpu, max_new_tokens=args.max_new_tokens
         )
@@ -61,6 +63,7 @@ def main():
         "dtype": "float32",
         "torch_version": torch.__version__,
         "transformers_version": transformers.__version__,
+        "training": training,
     }
     (output / "evaluation.json").write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -93,21 +96,7 @@ def main():
     (output / "scores.json").write_text(
         json.dumps(scores, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    for name, label in (
-        ("all", "全体"),
-        ("with_context", "文脈あり"),
-        ("without_context", "文脈なし"),
-    ):
-        score = scores[name]
-        if score["count"]:
-            print(
-                f"{label}: {score['count']}件 | 完全一致率: {score['accuracy_at1']:.2%} "
-                f"({score['correct']}/{score['count']}) | "
-                f"平均MinCER: {score['mean_min_cer']:.4f} | 生成上限到達: {score['truncated']}件",
-                flush=True,
-            )
-        else:
-            print(f"{label}: 0件（対象なし）", flush=True)
+    print(write_summary(output), end="", flush=True)
 
 
 if __name__ == "__main__":

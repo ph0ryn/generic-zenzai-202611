@@ -341,6 +341,9 @@ class TrainingTest(unittest.TestCase):
             metadata = json.loads((output / "run.json").read_text())
             self.assertEqual(metadata["examples"], 34)
             metrics = json.loads((output / "train_results.json").read_text())
+            self.assertEqual(metrics["global_step"], 2)
+            self.assertEqual(metrics["precision"], "fp32")
+            self.assertEqual(metrics["effective_batch_size"], 32)
             self.assertTrue(math.isfinite(metrics["train_loss"]))
             checkpoint = output / "checkpoint-2"
             self.assertTrue((checkpoint / "optimizer.pt").is_file())

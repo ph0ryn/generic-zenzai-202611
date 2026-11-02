@@ -175,6 +175,11 @@ def main():
     )
     trainer.save_model(str(args.output / "model"))
     tokenizer.save_pretrained(args.output / "model")
+    result.metrics.update(
+        global_step=trainer.state.global_step,
+        precision=precision,
+        effective_batch_size=effective_batch_size,
+    )
     trainer.save_metrics("train", result.metrics)
     model_path.write_text(
         str((args.output / "model").resolve()) + "\n", encoding="utf-8"

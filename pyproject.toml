@@ -37,6 +37,7 @@ explicit = true
 [project.scripts]
 generic-zenzai-202611 = "generic_zenzai_202611.train:main"
 generic-zenzai-evaluate = "generic_zenzai_202611.evaluate:main"
+generic-zenzai-summary = "generic_zenzai_202611.summary:main"
 
 [build-system]
 requires = ["uv_build>=0.13.4,<0.14.0"]

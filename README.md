@@ -31,6 +31,8 @@ drive.mount("/content/drive")
 !uv run --locked generic-zenzai-evaluate --model "$(cat model-path.txt)"
 ```
 
+評価の最後に出る「実験サマリー」を貼れば、学習条件と評価結果をまとめて共有できる。
+
 学習データ5,000件は同梱済み。モデルは初回にHugging Faceから取得する。
 uvがプロジェクト用のPython 3.14と依存関係を用意する。
 所要時間と消費コンピュートユニットは、割り当てられたGPUによって変わる。

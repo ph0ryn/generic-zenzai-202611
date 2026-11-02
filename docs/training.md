@@ -37,7 +37,7 @@ Colabでの開始手順は[README](../README.md#usage)を参照。
 - `model/`: 学習済みモデルとtokenizer。`from_pretrained`で読み込める。
 - `checkpoint-N/`: optimizer・学習進捗などを含む再開用の状態。
 - `run.json`: モデルrevision、データのSHA-256、学習設定。
-- `train_results.json`: 完了時の学習損失・速度など。
+- `train_results.json`: 完了時の学習損失・速度、更新回数、計算精度、実効バッチなど。
 
 学習コマンドの実行ディレクトリには`model-path.txt`を自動で作成する。
 完了時に学習済みモデルの絶対パスを1行で書き出す。

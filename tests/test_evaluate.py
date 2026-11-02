@@ -11,6 +11,8 @@ import torch
 from tokenizers import Tokenizer, models, pre_tokenizers
 from transformers import LlamaConfig, LlamaForCausalLM, PreTrainedTokenizerFast
 
+from generic_zenzai_202611.summary import write_summary
+
 
 class EvaluationTest(unittest.TestCase):
     def setUp(self):
@@ -167,7 +169,11 @@ class EvaluationTest(unittest.TestCase):
                 "2/2 | 判定: 不一致 | MinCER: 0.5000",
             ],
         )
-        self.assertEqual(len(result.stdout.splitlines()), 6)
+        summary = (first / "summary.md").read_text(encoding="utf-8")
+        self.assertIn(summary, result.stdout)
+        self.assertIn("学習記録: なし（学習条件は不明）", summary)
+        self.assertIn("空出力: 0件", summary)
+        self.assertNotIn("アツイ", summary)
         self.assertIn("全体: 2件 | 完全一致率: 50.00% (1/2)", result.stdout)
         self.assertIn("平均MinCER: 0.2500 | 生成上限到達: 2件", result.stdout)
         self.assertNotIn("[評価]", result.stdout)
@@ -187,6 +193,106 @@ class EvaluationTest(unittest.TestCase):
             ],
             predictions,
         )
+
+    def test_summary_records_training_and_can_be_reprinted_without_model(self):
+        training = {
+            "model": "llm-jp/llm-jp-3-150m",
+            "revision": "do-not-print-this-revision",
+            "data_sha256": "do-not-print-this-hash",
+            "examples": 5000,
+            "learning_rate": 5e-5,
+            "batch_size": 2,
+            "gradient_accumulation": 16,
+            "max_tokens": 512,
+            "context_chars": 40,
+            "seed": 42,
+        }
+        metrics = {
+            "epoch": 3,
+            "global_step": 471,
+            "precision": "fp16",
+            "effective_batch_size": 32,
+            "train_runtime": 972.3964,
+            "train_loss": 1.34793359,
+            "mean_token_accuracy": 0.9632543,
+        }
+        (self.root / "run.json").write_text(json.dumps(training))
+        (self.root / "train_results.json").write_text(json.dumps(metrics))
+        result = self.evaluate()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        output = next(self.output.glob("eval-*"))
+        summary = (output / "summary.md").read_text(encoding="utf-8")
+        for text in (
+            "5,000件",
+            "周回数: 3",
+            "更新回数: 471",
+            "972.4秒",
+            "96.33%",
+            "fp16",
+        ):
+            self.assertIn(text, summary)
+        for text in (training["revision"], training["data_sha256"], "アツイ", "熱い"):
+            self.assertNotIn(text, summary)
+        metadata = json.loads((output / "evaluation.json").read_text())
+        self.assertEqual(
+            metadata["training"], {"settings": training, "metrics": metrics}
+        )
+
+        # Old evaluations have no snapshot; read the adjacent training records.
+        del metadata["training"]
+        (output / "evaluation.json").write_text(json.dumps(metadata))
+        self.assertEqual(write_summary(output), summary)
+
+        # An earlier checkpoint must not inherit the completed run's metrics.
+        checkpoint = self.root / "checkpoint-157"
+        checkpoint.mkdir()
+        (checkpoint / "trainer_state.json").write_text(
+            json.dumps({"epoch": 1, "global_step": 157})
+        )
+        metadata["model"] = str(checkpoint)
+        (output / "evaluation.json").write_text(json.dumps(metadata))
+        checkpoint_summary = write_summary(output)
+        self.assertIn("周回数: 1", checkpoint_summary)
+        self.assertIn("更新回数: 157", checkpoint_summary)
+        self.assertIn("学習loss: 未記録", checkpoint_summary)
+        self.assertNotIn("96.33%", checkpoint_summary)
+
+        metadata["model"] = str(self.model.resolve())
+        metadata["training"] = {"settings": training, "metrics": metrics}
+        (output / "evaluation.json").write_text(json.dumps(metadata))
+        self.model.rename(self.root / "unavailable-model")
+        (self.root / "run.json").unlink()
+        (self.root / "train_results.json").unlink()
+        (output / "summary.md").unlink()
+        repeated = subprocess.run(
+            [sys.executable, "-m", "generic_zenzai_202611.summary", str(output)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            env={**os.environ, "HF_HUB_OFFLINE": "1"},
+        )
+        self.assertEqual(repeated.returncode, 0, repeated.stdout + repeated.stderr)
+        self.assertEqual(repeated.stdout, summary)
+        self.assertEqual((output / "summary.md").read_text(encoding="utf-8"), summary)
+
+        # Damaged or incomplete results must not replace an existing summary.
+        scores_path = output / "scores.json"
+        scores = json.loads(scores_path.read_text())
+        scores["all"]["count"] += 1
+        scores_path.write_text(json.dumps(scores))
+        with self.assertRaisesRegex(ValueError, "一致しません"):
+            write_summary(output)
+        scores_path.unlink()
+        with self.assertRaises(FileNotFoundError):
+            write_summary(output)
+        self.assertEqual((output / "summary.md").read_text(encoding="utf-8"), summary)
+
+    def test_invalid_training_record_fails_before_evaluation(self):
+        (self.root / "run.json").write_text("invalid json")
+        result = self.evaluate()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.output.exists())
 
     def test_eos_stops_generation_and_is_not_marked_truncated(self):
         from transformers import AutoTokenizer
