@@ -111,7 +111,7 @@ def main():
             args.wikipedia_count,
             args.corpus_count,
         )
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, TypeError) as error:
         parser.error(f"学習データを生成できません: {error}")
     print(f"生成した学習データ: {data_path}", flush=True)
 
