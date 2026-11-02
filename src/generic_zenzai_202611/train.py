@@ -85,6 +85,8 @@ def main():
         )
     except (ValueError, OSError) as error:
         parser.error(str(error))
+    model_path = Path("model-path.txt")
+    model_path.write_text("", encoding="utf-8")
     print(f"出力先: {args.output}", flush=True)
     if args.resume_from:
         print(f"再開元: {args.resume_from}", flush=True)
@@ -174,4 +176,7 @@ def main():
     trainer.save_model(str(args.output / "model"))
     tokenizer.save_pretrained(args.output / "model")
     trainer.save_metrics("train", result.metrics)
+    model_path.write_text(
+        str((args.output / "model").resolve()) + "\n", encoding="utf-8"
+    )
     print(f"学習済みモデル: {args.output / 'model'}", flush=True)

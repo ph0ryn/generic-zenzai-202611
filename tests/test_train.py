@@ -280,7 +280,8 @@ class TrainingTest(unittest.TestCase):
             data.write_text(
                 "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
             )
-            output = root / "run"
+            output = root / "runs with spaces and 'quotes'"
+            exported_model = root / "model-path.txt"
             command = [
                 str(Path(sys.executable).with_name("generic-zenzai-202611")),
                 "--model",
@@ -305,6 +306,7 @@ class TrainingTest(unittest.TestCase):
                 capture_output=True,
                 text=True,
                 env=env,
+                cwd=root,
                 timeout=120,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -321,6 +323,10 @@ class TrainingTest(unittest.TestCase):
             output = next(output.glob("run-*"))
             self.assertIn(f"出力先: {output}", result.stdout)
             self.assertTrue((output / "model" / "model.safetensors").is_file())
+            self.assertEqual(
+                exported_model.read_text(encoding="utf-8"),
+                str((output / "model").resolve()) + "\n",
+            )
             trained = AutoModelForCausalLM.from_pretrained(output / "model")
             restored_tokenizer = AutoTokenizer.from_pretrained(output / "model")
             self.assertFalse(torch.equal(before, trained.get_input_embeddings().weight))
@@ -346,6 +352,7 @@ class TrainingTest(unittest.TestCase):
                 capture_output=True,
                 text=True,
                 env=env,
+                cwd=root,
                 timeout=120,
             )
             self.assertNotEqual(repeated.returncode, 0)
@@ -358,6 +365,7 @@ class TrainingTest(unittest.TestCase):
                 capture_output=True,
                 text=True,
                 env=env,
+                cwd=root,
                 timeout=120,
             )
             self.assertEqual(resumed.returncode, 0, resumed.stdout + resumed.stderr)
@@ -365,6 +373,23 @@ class TrainingTest(unittest.TestCase):
                 (output / "checkpoint-4" / "trainer_state.json").read_text()
             )
             self.assertEqual(state["global_step"], 4)
+            self.assertEqual(
+                exported_model.read_text(encoding="utf-8"),
+                str((output / "model").resolve()) + "\n",
+            )
+
+            # A failed new training must not leave the previous model exported.
+            failed = subprocess.run(
+                command + ["--data", str(root / "missing.jsonl")],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=root,
+                timeout=120,
+            )
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertEqual(exported_model.read_text(encoding="utf-8"), "")
 
 
 if __name__ == "__main__":

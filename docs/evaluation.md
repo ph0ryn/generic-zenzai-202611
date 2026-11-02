@@ -1,15 +1,19 @@
 # AJIMEE評価
 
 [学習](../README.md#学習)とは別コマンドで実行する。評価に失敗しても学習のやり直しは不要。
-以下は学習と同じColabランタイムで、プロジェクトのルートから実行する例。
-`model`には学習の最後に表示された`学習済みモデル:`のパスを指定する。
+学習コマンドは完了時に、実行ディレクトリの`model-path.txt`へモデルパスを自動で書き出す。
+学習と同じColabランタイム・ディレクトリで、次のセルを実行する。
+日時入りパスの手入力や、一時変数への格納は不要。
 
 ```python
-model = "/content/drive/MyDrive/generic-zenzai-202611/run-実際の日時/model"
-!uv run --locked generic-zenzai-evaluate --model "{model}"
+!uv run --locked generic-zenzai-evaluate --model "$(cat model-path.txt)"
 ```
 
-`run-実際の日時`は実在する名前に置き換える。
+ローカルのシェルでは、先頭の`!`を除いて実行する。
+学習が正常に完了してから評価する。次の学習開始時には以前のモデルパスを空にし、
+完了したときだけ新しいパスを書き出す。
+
+別のモデルを評価するときは、従来どおり`--model /path/to/model`で直接指定できる。
 保存済みモデルとtokenizerだけを読み、評価中のダウンロードは行わない。
 CUDA GPUを使わない場合は`--cpu`を付ける。ローカルでも同じCLIを使える。
 
