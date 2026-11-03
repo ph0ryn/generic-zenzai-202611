@@ -213,6 +213,7 @@ class EvaluationTest(unittest.TestCase):
             "precision": "fp16",
             "effective_batch_size": 32,
             "train_runtime": 972.3964,
+            "train_runtime_total": 1572.3964,
             "train_loss": 1.34793359,
             "mean_token_accuracy": 0.9632543,
         }
@@ -226,7 +227,8 @@ class EvaluationTest(unittest.TestCase):
             "5,000件",
             "周回数: 3",
             "更新回数: 471",
-            "972.4秒",
+            "累計学習時間: 1572.4秒",
+            "今回の学習実行時間: 972.4秒",
             "96.33%",
             "fp16",
         ):

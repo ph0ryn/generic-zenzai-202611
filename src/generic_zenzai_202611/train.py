@@ -16,6 +16,7 @@ from .generate_data import generate_train_jsonl
 from .prepare import prepared_model_path
 from .prompting import CONTEXT_CHARS, MAX_TOKENS, make_prompt
 from .training_data import encode_example, prepare_dataset
+from .training_time import TrainingTimeCallback
 
 # Preserve helper imports for existing callers of the training module.
 __all__ = [
@@ -188,6 +189,7 @@ def main():
             disable_tqdm=True,
             save_steps=args.save_steps,
             save_total_limit=1,
+            restore_callback_states_from_checkpoint=True,
             eval_strategy="no",
             report_to="none",
             seed=settings["seed"],
@@ -197,6 +199,7 @@ def main():
     )
     trainer.remove_callback(PrinterCallback)
     trainer.add_callback(TrainingLogCallback)
+    trainer.add_callback(TrainingTimeCallback)
     args.output.mkdir(parents=True, exist_ok=True)
     metadata_path.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n")
     effective_batch_size = (
@@ -211,6 +214,15 @@ def main():
     print(f"計算精度: {precision}", flush=True)
     result = trainer.train(
         resume_from_checkpoint=str(args.resume_from) if args.resume_from else None
+    )
+    # Restoring callback state replaces the original instance inside Trainer.
+    timing = trainer.pop_callback(TrainingTimeCallback)
+    result.metrics["train_runtime_total"] = (
+        timing.elapsed + result.metrics["train_runtime"]
+    )
+    print(
+        f"累計学習時間: {result.metrics['train_runtime_total']:.1f}秒（中断時間を除く）",
+        flush=True,
     )
     trainer.save_model(str(args.output / "model"))
     tokenizer.save_pretrained(args.output / "model")

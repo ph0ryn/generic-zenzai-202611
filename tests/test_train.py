@@ -456,6 +456,9 @@ class TrainingTest(unittest.TestCase):
             self.assertEqual(metrics["precision"], "fp32")
             self.assertEqual(metrics["effective_batch_size"], 32)
             self.assertTrue(math.isfinite(metrics["train_loss"]))
+            self.assertEqual(metrics["train_runtime_total"], metrics["train_runtime"])
+            self.assertIn("累計学習時間:", result.stdout)
+            self.assertTrue(training_args.restore_callback_states_from_checkpoint)
             self.assertEqual(list(output.glob("checkpoint-*")), [])
 
             # Automatic resume must not restart a completed run.
@@ -478,7 +481,9 @@ class TrainingTest(unittest.TestCase):
                     sys.executable,
                     "-c",
                     (
-                        "from generic_zenzai_202611 import train\n"
+                        "from itertools import count\n"
+                        "from generic_zenzai_202611 import train, training_time\n"
+                        "training_time.perf_counter = count(1000, 10).__next__\n"
                         "class Interrupt(train.TrainingLogCallback):\n"
                         "    def on_save(self, *args, **kwargs):\n"
                         "        raise RuntimeError('injected training interruption')\n"
@@ -502,6 +507,11 @@ class TrainingTest(unittest.TestCase):
             )
             self.assertFalse((interrupted_run / "train_results.json").exists())
             self.assertEqual(exported_model.read_text(encoding="utf-8"), "")
+            checkpoint_state = json.loads(
+                (interrupted_run / "checkpoint-1" / "trainer_state.json").read_text()
+            )
+            timing = checkpoint_state["stateful_callbacks"]["TrainingTimeCallback"]
+            self.assertEqual(timing, {"args": {"elapsed": 10.0}, "attributes": {}})
 
             # Final artifact save failures must also keep the resumable state.
             save_failed = subprocess.run(
@@ -509,8 +519,10 @@ class TrainingTest(unittest.TestCase):
                     sys.executable,
                     "-c",
                     (
+                        "from itertools import count\n"
                         "from unittest.mock import patch\n"
-                        "from generic_zenzai_202611 import train\n"
+                        "from generic_zenzai_202611 import train, training_time\n"
+                        "training_time.perf_counter = count(100000, 20).__next__\n"
                         "with patch.object(train.SFTTrainer, 'save_metrics', "
                         "side_effect=OSError('injected metrics save failure')):\n"
                         "    train.main()\n"
@@ -527,6 +539,12 @@ class TrainingTest(unittest.TestCase):
             )
             self.assertNotEqual(save_failed.returncode, 0)
             self.assertIn("injected metrics save failure", save_failed.stderr)
+            checkpoint_state = json.loads(
+                (interrupted_run / "checkpoint-2" / "trainer_state.json").read_text()
+            )
+            timing = checkpoint_state["stateful_callbacks"]["TrainingTimeCallback"]
+            # A new process clock origin must not count downtime or reset prior time.
+            self.assertEqual(timing, {"args": {"elapsed": 30.0}, "attributes": {}})
             self.assertTrue(
                 (interrupted_run / "checkpoint-2" / "optimizer.pt").is_file()
             )
@@ -549,6 +567,10 @@ class TrainingTest(unittest.TestCase):
             self.assertEqual(resumed.returncode, 0, resumed.stdout + resumed.stderr)
             state = json.loads((interrupted_run / "train_results.json").read_text())
             self.assertEqual(state["global_step"], 4)
+            self.assertEqual(
+                state["train_runtime_total"], 30.0 + state["train_runtime"]
+            )
+            self.assertIn("累計学習時間:", resumed.stdout)
             self.assertEqual(list(interrupted_run.glob("checkpoint-*")), [])
             self.assertEqual(scores_path.read_text(), '{"accuracy_at1": 0.5}\n')
             self.assertTrue((interrupted_run / "model" / "tokenizer.json").is_file())

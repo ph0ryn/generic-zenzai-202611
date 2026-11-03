@@ -63,6 +63,7 @@ def render_summary(output, metadata, scores, predictions):
             ("更新回数", "global_step", "d", ""),
             ("実効バッチ", "effective_batch_size", "d", "件"),
             ("計算精度", "precision", "s", ""),
+            ("累計学習時間", "train_runtime_total", ".1f", "秒"),
             ("今回の学習実行時間", "train_runtime", ".1f", "秒"),
             ("学習loss", "train_loss", ".4f", ""),
             ("最終ログ区間のトークン正解率", "mean_token_accuracy", ".2%", ""),
