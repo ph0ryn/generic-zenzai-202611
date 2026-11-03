@@ -52,7 +52,7 @@ VRAMが足りなければ、`--batch-size 16 --gradient-accumulation 2`、
 ## LFM2.5の実行セル
 
 [README](../README.md#usage)のclone・環境構築・Drive接続後、準備・学習セルを以下に置き換える。
-モデル・revision・保存先には既定値を使う。
+モデル・revision・保存先には[共通設定](../src/generic_zenzai_202611/config.py)を使う。
 
 ```python
 !uv run --locked prepare
@@ -81,23 +81,23 @@ VRAMが足りなければ、`--batch-size 16 --gradient-accumulation 2`、
 `ef51b5c08775961802764cf7c42da7f4debc426bc5fdeaca3925f954781cef57`と一致することを確認する。
 同じ件数でも入力データの内容が変われば同条件比較にはならない。
 
-Qwenを試す場合は、準備・学習の両セルに次のモデル指定を追加し、学習の出力先を変更する。
+準備・学習CLIにはモデル指定の引数を設けない。別モデルを試す場合は、
+共通設定の`MODEL_ID`・`MODEL_REVISION`・`MODEL_DIR`をまとめて変更してから準備し、
+学習の`--output`もモデルごとに分ける。
 
-| オプション | Qwen用の値 |
+| 共通設定 | Qwen用の値 |
 | --- | --- |
-| `--model` | `Qwen/Qwen3-0.6B-Base` |
-| `--revision` | `da87bfb608c14b7cf20ba1ce41287e8de496c0cd` |
-| `--model-dir` | `/content/drive/MyDrive/models/Qwen3-0.6B-Base` |
-| `--output`（学習のみ） | `/content/drive/MyDrive/generic-zenzai-202611/qwen3-0.6b` |
+| `MODEL_ID` | `Qwen/Qwen3-0.6B-Base` |
+| `MODEL_REVISION` | `da87bfb608c14b7cf20ba1ce41287e8de496c0cd` |
+| `MODEL_DIR` | `Path("/content/drive/MyDrive/models/Qwen3-0.6B-Base")` |
 
+Qwen用の`--output`は`/content/drive/MyDrive/generic-zenzai-202611/qwen3-0.6b`とする。
 固定revisionは[モデルの履歴](https://huggingface.co/LiquidAI/LFM2.5-350M-Base/commits/main)と
 Hugging Face APIから取得したもの。準備完了印と学習時のrevisionが違えば停止する。
-既定モデルもLFM2.5に変更済みで、READMEではモデル指定を省略して実行できる。
-過去のLLM-jpを使う場合は、準備・学習の両方で
-`--model llm-jp/llm-jp-3-150m`、
-`--revision b112feef602fff752e4dac4c30af6a2c2fa41c7a`、
-`--model-dir /content/drive/MyDrive/models/llm-jp-3-150m`を明示する。
-過去のrunを再開するときも、元のモデル・件数・バッチ・出力先を指定する。
+過去のLLM-jpを使う場合も、共通設定を元のモデルID・固定revision・保存先に戻す。
+モデルIDは`llm-jp/llm-jp-3-150m`、revisionは`b112feef602fff752e4dac4c30af6a2c2fa41c7a`、
+保存先は`/content/drive/MyDrive/models/llm-jp-3-150m`。
+過去のrunを再開するときは、元のモデル設定・件数・バッチ・出力先を揃える。
 
 ## 確認済みの範囲
 

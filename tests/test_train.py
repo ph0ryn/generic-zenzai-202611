@@ -21,7 +21,7 @@ from transformers import (
 )
 
 from generic_zenzai_202611.checkpoints import remove_checkpoints
-from generic_zenzai_202611.config import MODEL_REVISION
+from generic_zenzai_202611.config import MODEL_ID, MODEL_REVISION
 from generic_zenzai_202611.prepare import prepare_model
 from generic_zenzai_202611.train import (
     encode_example,
@@ -292,14 +292,29 @@ class DataTest(unittest.TestCase):
         )
 
 
+def train_command(base, setup=""):
+    """Run the real CLI with a synthetic snapshot, without production overrides."""
+    return [
+        sys.executable,
+        "-c",
+        (
+            "from pathlib import Path\n"
+            "from generic_zenzai_202611 import config\n"
+            f"config.MODEL_DIR = Path({str(base)!r})\n"
+            "from generic_zenzai_202611 import train, training_time\n"
+            f"{setup}\n"
+            "train.main()\n"
+        ),
+    ]
+
+
 class TrainingTest(unittest.TestCase):
-    def test_cli_rejects_invalid_batch_and_unpinned_revision(self):
+    def test_cli_rejects_invalid_batch(self):
         from generic_zenzai_202611.train import main
 
         for option, value in (
             ("--batch-size", "0"),
             ("--gradient-accumulation", "-1"),
-            ("--revision", "main"),
         ):
             with (
                 self.subTest(option=option),
@@ -320,7 +335,7 @@ class TrainingTest(unittest.TestCase):
                     main()
                 self.assertEqual(error.exception.code, 2)
 
-    def test_custom_prepared_models_train_with_accumulation_and_reload(self):
+    def test_synthetic_models_train_with_accumulation_and_reload(self):
         for model_id, config in (
             (
                 "Qwen/Qwen3-0.6B-Base",
@@ -351,9 +366,9 @@ class TrainingTest(unittest.TestCase):
             ),
         ):
             with self.subTest(model=model_id):
-                self.check_prepared_model(model_id, config)
+                self.check_prepared_model(config)
 
-    def check_prepared_model(self, model_id, config):
+    def check_prepared_model(self, config):
         from generic_zenzai_202611.inference import Converter
 
         with tempfile.TemporaryDirectory() as directory:
@@ -367,19 +382,12 @@ class TrainingTest(unittest.TestCase):
             model = AutoModelForCausalLM.from_config(config)
             before = model.get_input_embeddings().weight.detach().clone()
             model.save_pretrained(base)
-            (base / ".base-model-revision").write_text("a" * 40 + "\n")
+            (base / ".base-model-revision").write_text(MODEL_REVISION + "\n")
             sources = root / "dataset"
             sources.mkdir()
             row = {"input": "アツイ", "output": "熱い", "left_context": "お湯"}
             (sources / "train_wikipedia.jsonl").write_text((json.dumps(row) + "\n") * 4)
-            command = [
-                str(Path(sys.executable).with_name("train")),
-                "--model",
-                model_id,
-                "--revision",
-                "a" * 40,
-                "--model-dir",
-                str(base),
+            command = train_command(base) + [
                 "--dataset-dir",
                 str(sources),
                 "--wikipedia-count",
@@ -408,7 +416,7 @@ class TrainingTest(unittest.TestCase):
             saved = Path((root / "model-path.txt").read_text().strip())
             settings = json.loads((saved.parent / "run.json").read_text())
             self.assertEqual(
-                (settings["model"], settings["revision"]), (model_id, "a" * 40)
+                (settings["model"], settings["revision"]), (MODEL_ID, MODEL_REVISION)
             )
             self.assertEqual(
                 (settings["batch_size"], settings["gradient_accumulation"]), (1, 2)
@@ -436,10 +444,8 @@ class TrainingTest(unittest.TestCase):
             )
             base = root / "missing-model"
             result = subprocess.run(
-                [
-                    str(Path(sys.executable).with_name("train")),
-                    "--model-dir",
-                    str(base),
+                train_command(base)
+                + [
                     "--dataset-dir",
                     str(sources),
                     "--wikipedia-count",
@@ -507,10 +513,7 @@ class TrainingTest(unittest.TestCase):
                 )
             output = root / "runs with spaces and 'quotes'"
             exported_model = root / "model-path.txt"
-            command = [
-                str(Path(sys.executable).with_name("train")),
-                "--model-dir",
-                str(base),
+            command = train_command(base) + [
                 "--dataset-dir",
                 str(sources),
                 "--wikipedia-count",
@@ -611,21 +614,16 @@ class TrainingTest(unittest.TestCase):
             interrupted_parent = root / "interrupted-runs"
             interrupted_command = command + ["--output", str(interrupted_parent)]
             interrupted = subprocess.run(
-                [
-                    sys.executable,
-                    "-c",
-                    (
-                        "from itertools import count\n"
-                        "from generic_zenzai_202611 import train, training_time\n"
-                        "training_time.perf_counter = count(1000, 10).__next__\n"
-                        "class Interrupt(train.TrainingLogCallback):\n"
-                        "    def on_save(self, *args, **kwargs):\n"
-                        "        raise RuntimeError('injected training interruption')\n"
-                        "train.TrainingLogCallback = Interrupt\n"
-                        "train.main()\n"
-                    ),
-                    *interrupted_command[1:],
-                ],
+                train_command(
+                    base,
+                    "from itertools import count\n"
+                    "training_time.perf_counter = count(1000, 10).__next__\n"
+                    "class Interrupt(train.TrainingLogCallback):\n"
+                    "    def on_save(self, *args, **kwargs):\n"
+                    "        raise RuntimeError('injected training interruption')\n"
+                    "train.TrainingLogCallback = Interrupt\n",
+                )
+                + interrupted_command[3:],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -664,21 +662,16 @@ class TrainingTest(unittest.TestCase):
 
             # Final artifact save failures must also keep the resumable state.
             save_failed = subprocess.run(
-                [
-                    sys.executable,
-                    "-c",
-                    (
-                        "from itertools import count\n"
-                        "from unittest.mock import patch\n"
-                        "from generic_zenzai_202611 import train, training_time\n"
-                        "training_time.perf_counter = count(100000, 20).__next__\n"
-                        "with patch.object(train.SFTTrainer, 'save_metrics', "
-                        "side_effect=OSError('injected metrics save failure')):\n"
-                        "    train.main()\n"
-                    ),
-                    *interrupted_command[1:],
-                    "--resume",
-                ],
+                train_command(
+                    base,
+                    "from itertools import count\n"
+                    "from unittest.mock import patch\n"
+                    "training_time.perf_counter = count(100000, 20).__next__\n"
+                    "patch.object(train.SFTTrainer, 'save_metrics', "
+                    "side_effect=OSError('injected metrics save failure')).start()\n",
+                )
+                + interrupted_command[3:]
+                + ["--resume"],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -741,10 +734,9 @@ class TrainingTest(unittest.TestCase):
             self.assertNotEqual(failed.returncode, 0)
             self.assertEqual(exported_model.read_text(encoding="utf-8"), "")
 
-            # Explicit local models still bypass preparation of the default model.
-            custom = subprocess.run(
-                command[: command.index("--save-steps")]
-                + ["--model", str(base), "--model-dir", str(root / "unused")],
+            # Omitting save-steps keeps the default checkpoint settings.
+            default_save = subprocess.run(
+                command[: command.index("--save-steps")],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -752,17 +744,18 @@ class TrainingTest(unittest.TestCase):
                 cwd=root,
                 timeout=120,
             )
-            self.assertEqual(custom.returncode, 0, custom.stdout + custom.stderr)
-            self.assertFalse((root / "unused").exists())
-            custom_model = Path(exported_model.read_text(encoding="utf-8").strip())
-            custom_args = torch.load(
-                custom_model / "training_args.bin", weights_only=False
+            self.assertEqual(
+                default_save.returncode, 0, default_save.stdout + default_save.stderr
             )
-            self.assertEqual(custom_args.save_steps, 1000)
-            self.assertEqual(custom_args.save_total_limit, 1)
-            custom_metadata = json.loads((custom_model.parent / "run.json").read_text())
-            self.assertEqual(custom_metadata["model"], str(base))
-            self.assertIsNone(custom_metadata["revision"])
+            saved_model = Path(exported_model.read_text(encoding="utf-8").strip())
+            saved_args = torch.load(
+                saved_model / "training_args.bin", weights_only=False
+            )
+            self.assertEqual(saved_args.save_steps, 1000)
+            self.assertEqual(saved_args.save_total_limit, 1)
+            metadata = json.loads((saved_model.parent / "run.json").read_text())
+            self.assertEqual(metadata["model"], MODEL_ID)
+            self.assertEqual(metadata["revision"], MODEL_REVISION)
 
 
 if __name__ == "__main__":

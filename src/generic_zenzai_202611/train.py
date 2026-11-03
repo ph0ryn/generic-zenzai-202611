@@ -3,7 +3,6 @@
 import argparse
 import hashlib
 import json
-import re
 from pathlib import Path
 
 import torch
@@ -60,14 +59,6 @@ def main():
     parser = argparse.ArgumentParser(
         description="文脈付きかな漢字変換を全パラメータ学習する"
     )
-    parser.add_argument("--model", default=MODEL_ID)
-    parser.add_argument("--revision", help="準備済みモデルの固定commit SHA")
-    parser.add_argument(
-        "--model-dir",
-        type=Path,
-        default=MODEL_DIR,
-        help="事前に保存したベースモデルのディレクトリ",
-    )
     parser.add_argument(
         "--dataset-dir",
         type=Path,
@@ -93,8 +84,6 @@ def main():
     )
     parser.add_argument("--cpu", action="store_true", help="小規模な動作確認用")
     args = parser.parse_args()
-    if args.revision is not None and not re.fullmatch(r"[0-9a-f]{40}", args.revision):
-        parser.error("revisionには40桁のcommit SHAを指定してください。")
     if args.epochs <= 0 or args.save_steps <= 0:
         parser.error("epochsとsave-stepsは正の値を指定してください。")
     if args.batch_size <= 0 or args.gradient_accumulation <= 0:
@@ -130,22 +119,17 @@ def main():
     print(f"生成した学習データ: {data_path}", flush=True)
 
     set_seed(42)
-    revision = args.revision or (MODEL_REVISION if args.model == MODEL_ID else None)
     try:
-        model_source = (
-            prepared_model_path(args.model_dir, revision) if revision else args.model
-        )
+        model_source = prepared_model_path(MODEL_DIR)
     except (OSError, ValueError) as error:
         parser.error(str(error))
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_source, revision=revision, local_files_only=revision is not None
-    )
+    tokenizer = AutoTokenizer.from_pretrained(model_source, local_files_only=True)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     dataset = prepare_dataset(data_path, tokenizer)
     settings = {
-        "model": args.model,
-        "revision": revision,
+        "model": MODEL_ID,
+        "revision": MODEL_REVISION,
         "data_sha256": hashlib.sha256(data_path.read_bytes()).hexdigest(),
         "examples": len(dataset),
         "max_tokens": MAX_TOKENS,
@@ -168,8 +152,7 @@ def main():
 
     model = AutoModelForCausalLM.from_pretrained(
         model_source,
-        revision=revision,
-        local_files_only=revision is not None,
+        local_files_only=True,
         dtype=torch.float32,
         attn_implementation="sdpa",
     )

@@ -27,8 +27,8 @@ JSONの破損やその他の入力検証エラーは除外せずに停止する�
 
 バッチ件数は`--batch-size`、勾配累積は`--gradient-accumulation`で変更できる。
 どちらも正の整数が必要で、積がGPU 1台での実効バッチ件数になる。
-別モデルをDriveへ準備するには、`prepare`に`--model`・`--revision`（40桁のcommit SHA）・
-`--model-dir`を指定し、学習にも同じ3つの値を指定する。
+モデルID・固定revision・保存先は[共通設定](../src/generic_zenzai_202611/config.py)を使い、
+準備・学習CLIにはモデルを切り替える引数を設けない。
 候補と具体的なセルは[モデル比較](models.md)を参照。
 
 開始時に計算精度を表示する。T4では`計算精度: fp16`になる。
@@ -44,8 +44,6 @@ JSONの破損やその他の入力検証エラーは除外せずに停止する�
 `uv run --locked task prepare`で元データとベースモデルをDriveへ事前保存する。
 保存済みのものは再取得せず、学習ではDrive上のベースモデルを読み込む。
 学習時には既定モデルの取得・保存を行わない。未準備の場合はエラーになり、先に準備セルを実行する。
-保存先を変える場合は、準備・学習の両コマンドに同じ`--model-dir`を指定する。
-`--model`で別のモデルIDやローカルパスを指定した場合は、その指定先を直接読み込む。
 モデル・データセットの共有設定は[config.py](../src/generic_zenzai_202611/config.py)で管理する。
 既定モデルのrevisionは固定し、Drive上のパスではなくモデルIDとrevisionを`run.json`に記録する。
 モデルの出典は[LFM2.5のモデルカード](https://huggingface.co/LiquidAI/LFM2.5-350M-Base)、
