@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import torch
@@ -60,11 +61,12 @@ def main():
         description="文脈付きかな漢字変換を全パラメータ学習する"
     )
     parser.add_argument("--model", default=MODEL_ID)
+    parser.add_argument("--revision", help="準備済みモデルの固定commit SHA")
     parser.add_argument(
         "--model-dir",
         type=Path,
         default=MODEL_DIR,
-        help="事前に保存した既定のベースモデルのディレクトリ",
+        help="事前に保存したベースモデルのディレクトリ",
     )
     parser.add_argument(
         "--dataset-dir",
@@ -81,6 +83,8 @@ def main():
         help="日時付きrunを保存する親ディレクトリ",
     )
     parser.add_argument("--epochs", type=float, default=1)
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--gradient-accumulation", type=int, default=1)
     parser.add_argument("--save-steps", type=int, default=1000)
     resuming = parser.add_mutually_exclusive_group()
     resuming.add_argument("--resume", action="store_true", help="最新runから再開")
@@ -89,8 +93,12 @@ def main():
     )
     parser.add_argument("--cpu", action="store_true", help="小規模な動作確認用")
     args = parser.parse_args()
+    if args.revision is not None and not re.fullmatch(r"[0-9a-f]{40}", args.revision):
+        parser.error("revisionには40桁のcommit SHAを指定してください。")
     if args.epochs <= 0 or args.save_steps <= 0:
         parser.error("epochsとsave-stepsは正の値を指定してください。")
+    if args.batch_size <= 0 or args.gradient_accumulation <= 0:
+        parser.error("batch-sizeとgradient-accumulationは正の整数を指定してください。")
     if min(args.wikipedia_count, args.corpus_count) < 0 or not (
         args.wikipedia_count + args.corpus_count
     ):
@@ -122,9 +130,11 @@ def main():
     print(f"生成した学習データ: {data_path}", flush=True)
 
     set_seed(42)
-    revision = MODEL_REVISION if args.model == MODEL_ID else None
+    revision = args.revision or (MODEL_REVISION if args.model == MODEL_ID else None)
     try:
-        model_source = prepared_model_path(args.model_dir) if revision else args.model
+        model_source = (
+            prepared_model_path(args.model_dir, revision) if revision else args.model
+        )
     except (OSError, ValueError) as error:
         parser.error(str(error))
     tokenizer = AutoTokenizer.from_pretrained(
@@ -141,8 +151,8 @@ def main():
         "max_tokens": MAX_TOKENS,
         "context_chars": CONTEXT_CHARS,
         "learning_rate": 5e-5,
-        "batch_size": 32,
-        "gradient_accumulation": 1,
+        "batch_size": args.batch_size,
+        "gradient_accumulation": args.gradient_accumulation,
         "seed": 42,
     }
     metadata_path = args.output / "run.json"

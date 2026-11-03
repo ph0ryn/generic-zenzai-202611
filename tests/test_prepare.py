@@ -17,7 +17,23 @@ from generic_zenzai_202611.prepare import main
 
 
 class PrepareTest(unittest.TestCase):
-    def run_cli(self, root):
+    def test_custom_model_requires_pinned_revision_and_separate_destination(self):
+        for args in (
+            ["--model", "Qwen/Qwen3-0.6B-Base"],
+            ["--model", "Qwen/Qwen3-0.6B-Base", "--revision", "a" * 40],
+            ["--revision", "main"],
+        ):
+            with (
+                self.subTest(args=args),
+                patch("sys.argv", ["prepare", *args]),
+                patch("generic_zenzai_202611.prepare.snapshot_download") as download,
+            ):
+                with self.assertRaises(SystemExit) as error:
+                    main()
+                self.assertEqual(error.exception.code, 2)
+                download.assert_not_called()
+
+    def run_cli(self, root, *extra):
         with patch(
             "sys.argv",
             [
@@ -26,9 +42,40 @@ class PrepareTest(unittest.TestCase):
                 str(root / "model"),
                 "--dataset-dir",
                 str(root / "dataset"),
+                *extra,
             ],
         ):
             main()
+
+    def test_custom_model_revision_is_saved_reused_and_checked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "dataset").mkdir()
+            for name in DATASET_SOURCES:
+                (root / "dataset" / name).touch()
+
+            def download(*, repo_id, revision, local_dir):
+                self.assertEqual(
+                    (repo_id, revision), ("Qwen/Qwen3-0.6B-Base", "a" * 40)
+                )
+                local_dir.mkdir()
+                (local_dir / "config.json").write_text("{}")
+
+            args = ("--model", "Qwen/Qwen3-0.6B-Base", "--revision", "a" * 40)
+            with patch(
+                "generic_zenzai_202611.prepare.snapshot_download", side_effect=download
+            ):
+                self.run_cli(root, *args)
+            self.assertEqual(
+                (root / "model" / ".base-model-revision").read_text().strip(), "a" * 40
+            )
+            with patch(
+                "generic_zenzai_202611.prepare.snapshot_download",
+                side_effect=AssertionError("unexpected download"),
+            ):
+                self.run_cli(root, *args)
+                with self.assertRaises(ValueError):
+                    self.run_cli(root, *args, "--revision", "b" * 40)
 
     def fake_download(self, *, repo_id, revision, local_dir, **kwargs):
         local_dir.mkdir(parents=True, exist_ok=True)

@@ -13,9 +13,11 @@ from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
+    Lfm2Config,
     LlamaConfig,
     LlamaForCausalLM,
     PreTrainedTokenizerFast,
+    Qwen3Config,
 )
 
 from generic_zenzai_202611.checkpoints import remove_checkpoints
@@ -291,6 +293,138 @@ class DataTest(unittest.TestCase):
 
 
 class TrainingTest(unittest.TestCase):
+    def test_cli_rejects_invalid_batch_and_unpinned_revision(self):
+        from generic_zenzai_202611.train import main
+
+        for option, value in (
+            ("--batch-size", "0"),
+            ("--gradient-accumulation", "-1"),
+            ("--revision", "main"),
+        ):
+            with (
+                self.subTest(option=option),
+                patch(
+                    "sys.argv",
+                    [
+                        "train",
+                        "--wikipedia-count",
+                        "1",
+                        "--corpus-count",
+                        "0",
+                        option,
+                        value,
+                    ],
+                ),
+            ):
+                with self.assertRaises(SystemExit) as error:
+                    main()
+                self.assertEqual(error.exception.code, 2)
+
+    def test_custom_prepared_models_train_with_accumulation_and_reload(self):
+        for model_id, config in (
+            (
+                "Qwen/Qwen3-0.6B-Base",
+                Qwen3Config(
+                    vocab_size=300,
+                    hidden_size=32,
+                    intermediate_size=64,
+                    num_hidden_layers=1,
+                    num_attention_heads=2,
+                    num_key_value_heads=2,
+                    head_dim=16,
+                    max_position_embeddings=512,
+                ),
+            ),
+            (
+                "LiquidAI/LFM2.5-350M-Base",
+                Lfm2Config(
+                    vocab_size=300,
+                    hidden_size=32,
+                    intermediate_size=64,
+                    num_hidden_layers=2,
+                    num_attention_heads=2,
+                    num_key_value_heads=2,
+                    full_attn_idxs=[1],
+                    block_auto_adjust_ff_dim=False,
+                    max_position_embeddings=512,
+                ),
+            ),
+        ):
+            with self.subTest(model=model_id):
+                self.check_prepared_model(model_id, config)
+
+    def check_prepared_model(self, model_id, config):
+        from generic_zenzai_202611.inference import Converter
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            base = root / "base"
+            tokenizer = make_tokenizer()
+            tokenizer.save_pretrained(base)
+            config.vocab_size = len(tokenizer)
+            config.eos_token_id = tokenizer.eos_token_id
+            config.pad_token_id = tokenizer.pad_token_id
+            model = AutoModelForCausalLM.from_config(config)
+            before = model.get_input_embeddings().weight.detach().clone()
+            model.save_pretrained(base)
+            (base / ".base-model-revision").write_text("a" * 40 + "\n")
+            sources = root / "dataset"
+            sources.mkdir()
+            row = {"input": "アツイ", "output": "熱い", "left_context": "お湯"}
+            (sources / "train_wikipedia.jsonl").write_text((json.dumps(row) + "\n") * 4)
+            command = [
+                str(Path(sys.executable).with_name("train")),
+                "--model",
+                model_id,
+                "--revision",
+                "a" * 40,
+                "--model-dir",
+                str(base),
+                "--dataset-dir",
+                str(sources),
+                "--wikipedia-count",
+                "4",
+                "--corpus-count",
+                "0",
+                "--output",
+                str(root / "runs"),
+                "--batch-size",
+                "1",
+                "--gradient-accumulation",
+                "2",
+                "--cpu",
+            ]
+            env = {**os.environ, "HF_HUB_OFFLINE": "1", "OMP_NUM_THREADS": "1"}
+            result = subprocess.run(
+                command,
+                check=False,
+                cwd=root,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            saved = Path((root / "model-path.txt").read_text().strip())
+            settings = json.loads((saved.parent / "run.json").read_text())
+            self.assertEqual(
+                (settings["model"], settings["revision"]), (model_id, "a" * 40)
+            )
+            self.assertEqual(
+                (settings["batch_size"], settings["gradient_accumulation"]), (1, 2)
+            )
+            metrics = json.loads((saved.parent / "train_results.json").read_text())
+            self.assertEqual(metrics["global_step"], 2)
+            self.assertTrue(math.isfinite(metrics["train_loss"]))
+            converter = Converter(saved, cpu=True, max_new_tokens=2)
+            self.assertFalse(
+                torch.equal(before, converter.model.get_input_embeddings().weight)
+            )
+            inputs = converter.prepare_inputs(
+                [{"index": "1", "input": "アツイ", "context_text": "お湯"}]
+            )
+            self.assertGreater(converter.predict(inputs[0])["generated_tokens"], 0)
+
     def test_cli_rejects_unprepared_model_without_downloading(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -507,6 +641,21 @@ class TrainingTest(unittest.TestCase):
             )
             self.assertFalse((interrupted_run / "train_results.json").exists())
             self.assertEqual(exported_model.read_text(encoding="utf-8"), "")
+            changed_batch = subprocess.run(
+                interrupted_command
+                + ["--resume", "--batch-size", "16", "--gradient-accumulation", "2"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=root,
+                timeout=120,
+            )
+            self.assertNotEqual(changed_batch.returncode, 0)
+            self.assertIn("学習設定が異なる", changed_batch.stderr)
+            self.assertTrue(
+                (interrupted_run / "checkpoint-1" / "optimizer.pt").is_file()
+            )
             checkpoint_state = json.loads(
                 (interrupted_run / "checkpoint-1" / "trainer_state.json").read_text()
             )
