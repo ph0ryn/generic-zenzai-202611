@@ -52,20 +52,14 @@ VRAMが足りなければ、`--batch-size 16 --gradient-accumulation 2`、
 ## LFM2.5の実行セル
 
 [README](../README.md#usage)のclone・環境構築・Drive接続後、準備・学習セルを以下に置き換える。
-これらのオプションを追加したコードがColabのcheckoutへ反映されていることが必要。
+モデル・revision・保存先には既定値を使う。
 
 ```python
-!uv run --locked prepare \
-    --model LiquidAI/LFM2.5-350M-Base \
-    --revision 9960764e30892e01f29a6dc23df2533fcd8bd5ae \
-    --model-dir /content/drive/MyDrive/models/LFM2.5-350M-Base
+!uv run --locked prepare
 ```
 
 ```python
 !uv run --locked train \
-    --model LiquidAI/LFM2.5-350M-Base \
-    --revision 9960764e30892e01f29a6dc23df2533fcd8bd5ae \
-    --model-dir /content/drive/MyDrive/models/LFM2.5-350M-Base \
     --wikipedia-count 67500 \
     --corpus-count 67500 \
     --epochs 3 \
@@ -87,7 +81,7 @@ VRAMが足りなければ、`--batch-size 16 --gradient-accumulation 2`、
 `ef51b5c08775961802764cf7c42da7f4debc426bc5fdeaca3925f954781cef57`と一致することを確認する。
 同じ件数でも入力データの内容が変われば同条件比較にはならない。
 
-Qwenを試す場合は、準備・学習の両セルを次の値に置き換える。
+Qwenを試す場合は、準備・学習の両セルに次のモデル指定を追加し、学習の出力先を変更する。
 
 | オプション | Qwen用の値 |
 | --- | --- |
