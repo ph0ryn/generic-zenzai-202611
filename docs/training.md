@@ -17,7 +17,7 @@ JSONの破損やその他の入力検証エラーは除外せずに停止する�
 
 | 設定 | 既定値 |
 | --- | --- |
-| モデル | `llm-jp/llm-jp-3-150m`、全パラメータを更新 |
+| モデル | `LiquidAI/LFM2.5-350M-Base`、全パラメータを更新 |
 | 周回数 | 1 epoch（`--epochs`で変更） |
 | 学習率 | `5e-5`。最初の5%で増やし、その後は線形に下げる |
 | バッチ | 32件 × 勾配累積1回（累積なし）。実効32件 |
@@ -48,7 +48,7 @@ JSONの破損やその他の入力検証エラーは除外せずに停止する�
 `--model`で別のモデルIDやローカルパスを指定した場合は、その指定先を直接読み込む。
 モデル・データセットの共有設定は[config.py](../src/generic_zenzai_202611/config.py)で管理する。
 既定モデルのrevisionは固定し、Drive上のパスではなくモデルIDとrevisionを`run.json`に記録する。
-モデルの出典は[LLM-jpのモデルカード](https://huggingface.co/llm-jp/llm-jp-3-150m)、
+モデルの出典は[LFM2.5のモデルカード](https://huggingface.co/LiquidAI/LFM2.5-350M-Base)、
 学習データの出典・ライセンス・品質上の制限は[以下の説明](#学習データの出典と制限)を参照。
 その他のCLIオプションは`uv run --locked train --help`で確認できる。
 
@@ -83,9 +83,10 @@ Colabでclone・環境準備・Drive接続をやり直し、元と同じ`--outpu
 
 ```python
 !uv run --locked train \
-    --wikipedia-count 7500 \
-    --corpus-count 7500 \
-    --output /content/drive/MyDrive/generic-zenzai-202611 \
+    --wikipedia-count 67500 \
+    --corpus-count 67500 \
+    --epochs 3 \
+    --output /content/drive/MyDrive/generic-zenzai-202611/lfm2.5-350m \
     --resume
 ```
 
@@ -102,11 +103,12 @@ Colabでclone・環境準備・Drive接続をやり直し、元と同じ`--outpu
 次の`run-実際の日時/checkpoint-N`を実在する名前に置き換える。
 
 ```python
-checkpoint = "/content/drive/MyDrive/generic-zenzai-202611/run-実際の日時/checkpoint-N"
+checkpoint = "/content/drive/MyDrive/generic-zenzai-202611/lfm2.5-350m/run-実際の日時/checkpoint-N"
 !uv run --locked train \
-    --wikipedia-count 7500 \
-    --corpus-count 7500 \
-    --output /content/drive/MyDrive/generic-zenzai-202611 \
+    --wikipedia-count 67500 \
+    --corpus-count 67500 \
+    --epochs 3 \
+    --output /content/drive/MyDrive/generic-zenzai-202611/lfm2.5-350m \
     --resume-from "{checkpoint}"
 ```
 

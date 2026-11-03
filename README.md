@@ -2,13 +2,15 @@
 
 事前学習済みの小型LLMを追加学習し、読みと直前の文脈からかな漢字変換するモデルを作る。
 Colab上で学習し、AJIMEE-Benchで変換精度を評価できる。
-既定モデルはLLM-jp-3-150m。次の比較候補は[モデル選定とT4用の実行セル](docs/models.md)を参照。
+既定モデルはLFM2.5-350M-Base。選定理由と比較候補は[モデル選定](docs/models.md)を参照。
 
 ## Usage
 
 Colabで新規ノートブックを作る。
 ランタイムをGPUに変更し、以下の5ブロックを別々のセルにコピーして、
 上から順に実行する。
+以下はLFM2.5-350M-Baseを135,000件・3周で全パラメータ学習する手順。
+バッチ32件・勾配累積1回を維持し、T4ではFP16で実行する。
 
 ```python
 !git clone --recurse-submodules https://github.com/ph0ryn/generic-zenzai-202611.git
@@ -30,10 +32,12 @@ drive.mount("/content/drive")
 
 ```python
 !uv run --locked train \
-    --wikipedia-count 7500 \
-    --corpus-count 7500 \
-    --epochs 1 \
-    --output /content/drive/MyDrive/generic-zenzai-202611
+    --wikipedia-count 67500 \
+    --corpus-count 67500 \
+    --epochs 3 \
+    --batch-size 32 \
+    --gradient-accumulation 1 \
+    --output /content/drive/MyDrive/generic-zenzai-202611/lfm2.5-350m
 ```
 
 ```python
@@ -55,7 +59,7 @@ Driveには元データ約36.5 GBに加え、ベースモデル用の空きが�
 別のデータセット準備用ノートブックは不要。
 
 - データセット: `/content/drive/MyDrive/datasets/zenz-v2.5-dataset`
-- ベースモデル: `/content/drive/MyDrive/models/llm-jp-3-150m`
+- ベースモデル: `/content/drive/MyDrive/models/LFM2.5-350M-Base`
 
 従来の手順で保存したデータセットも、対象の2ファイルが揃っていればそのまま使う。
 モデルはダウンロード成功後に完了印を保存し、中断した場合は次回に取得を再試行する。

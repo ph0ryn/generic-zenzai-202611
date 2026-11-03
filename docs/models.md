@@ -98,7 +98,12 @@ Qwenを試す場合は、準備・学習の両セルを次の値に置き換え�
 
 固定revisionは[モデルの履歴](https://huggingface.co/LiquidAI/LFM2.5-350M-Base/commits/main)と
 Hugging Face APIから取得したもの。準備完了印と学習時のrevisionが違えば停止する。
-既定のLLM-jpの準備・学習コマンドも引き続き使用できる。
+既定モデルもLFM2.5に変更済みで、READMEではモデル指定を省略して実行できる。
+過去のLLM-jpを使う場合は、準備・学習の両方で
+`--model llm-jp/llm-jp-3-150m`、
+`--revision b112feef602fff752e4dac4c30af6a2c2fa41c7a`、
+`--model-dir /content/drive/MyDrive/models/llm-jp-3-150m`を明示する。
+過去のrunを再開するときも、元のモデル・件数・バッチ・出力先を指定する。
 
 ## 確認済みの範囲
 

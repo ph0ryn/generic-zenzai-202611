@@ -79,7 +79,7 @@ def main():
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("runs/llm-jp-150m"),
+        default=Path("runs") / MODEL_ID.rsplit("/", 1)[-1],
         help="日時付きrunを保存する親ディレクトリ",
     )
     parser.add_argument("--epochs", type=float, default=1)

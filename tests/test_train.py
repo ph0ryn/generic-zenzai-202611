@@ -21,7 +21,7 @@ from transformers import (
 )
 
 from generic_zenzai_202611.checkpoints import remove_checkpoints
-from generic_zenzai_202611.config import MODEL_ID, MODEL_REVISION
+from generic_zenzai_202611.config import MODEL_REVISION
 from generic_zenzai_202611.prepare import prepare_model
 from generic_zenzai_202611.train import (
     encode_example,
@@ -568,7 +568,7 @@ class TrainingTest(unittest.TestCase):
                 tokens = trained.generate(**inputs, max_new_tokens=2, do_sample=False)
             self.assertGreater(tokens.shape[-1], inputs.input_ids.shape[-1])
             metadata = json.loads((output / "run.json").read_text())
-            self.assertEqual(metadata["model"], MODEL_ID)
+            self.assertEqual(metadata["model"], "LiquidAI/LFM2.5-350M-Base")
             self.assertEqual(metadata["revision"], MODEL_REVISION)
             self.assertNotIn("ベースモデルは保存済み", result.stdout)
             self.assertNotIn("ベースモデルを取得", result.stdout)
