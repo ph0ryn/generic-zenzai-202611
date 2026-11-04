@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "causal-conv1d==1.7.0+cu.12.6.torch.2.14 ; sys_platform == 'linux'",
     "datasets>=4.7,<5",
     "huggingface-hub>=1.33,<2",
     "torch>=2.14.1,<2.15",
@@ -30,10 +31,16 @@ extend-exclude = ["benchmarks/AJIMEE-Bench"]
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu126", marker = "sys_platform == 'linux'" }]
+causal-conv1d = { index = "astral-cu126" }
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
 url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[[tool.uv.index]]
+name = "astral-cu126"
+url = "https://wheels.astral.sh/simple/cu126/"
 explicit = true
 
 [project.scripts]

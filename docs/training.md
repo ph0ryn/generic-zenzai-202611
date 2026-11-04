@@ -50,6 +50,61 @@ JSONの破損やその他の入力検証エラーは除外せずに停止する�
 学習データの出典・ライセンス・品質上の制限は[以下の説明](#学習データの出典と制限)を参照。
 その他のCLIオプションは`uv run --locked train --help`で確認できる。
 
+## 高速畳み込みカーネル
+
+Linuxでは`uv sync --locked`により、`causal-conv1d`のビルド済みCUDA wheelを導入する。
+[依存設定](../pyproject.toml)で、現在のPython 3.14・PyTorch 2.14.1・CUDA 12.6に対応する
+[Astralの配布物](https://github.com/astral-sh-build/build-causal-conv1d#supported-versions)を指定している。
+Colabでのソースビルドや、別途の`pip install`は不要。macOSにはこのCUDA依存を導入しない。
+Transformersは導入済みのカーネルを自動で使う。警告を非表示にする変更ではない。
+この拡張を導入したLinux環境でのLFM2実行はCUDA専用になる。
+`--cpu`を使う場合は、拡張を除外する[ローカル開発の手順](development.md)で環境を作る。
+実際の学習全体の高速化率は未計測。
+
+Colabでは、以下を独立したセルで実行すると、拡張の読み込みとFP16のCUDA順伝播・逆伝播を確認できる。
+失敗した場合は学習を再開せず、表示されたエラーを確認する。
+
+```sh
+%%bash
+uv run --locked python - <<'PY'
+import torch
+import torch.nn.functional as F
+import causal_conv1d_cuda
+from causal_conv1d import causal_conv1d_fn
+
+torch.manual_seed(0)
+x = torch.randn(2, 16, 32, device="cuda", dtype=torch.float16, requires_grad=True)
+w = torch.randn(16, 3, device="cuda", requires_grad=True)
+y = causal_conv1d_fn(x, w)
+reference = F.conv1d(x.float(), w[:, None], padding=2, groups=16)[..., :32].half()
+torch.testing.assert_close(y, reference, rtol=2e-3, atol=2e-3)
+y.float().square().mean().backward()
+assert x.grad is not None and torch.isfinite(x.grad).all()
+assert w.grad is not None and torch.isfinite(w.grad).all()
+print("causal-conv1d CUDA forward/backward: OK")
+print(torch.cuda.get_device_name(0), torch.__version__, torch.version.cuda)
+PY
+```
+
+### 進行中の学習へ適用する
+
+再開可能なチェックポイントの保存完了を確認してから、学習セルを停止する。
+Colabのリポジトリ直下で次のセルを実行し、上記のカーネル動作確認を行う。
+
+```sh
+%%bash
+set -euo pipefail
+git pull --ff-only
+uv sync --locked
+```
+
+その後、元の学習コマンドに`--resume`を付けて再実行する。
+モデル・データ件数の内訳・周回数・バッチ・勾配累積・出力先は元と同じにする。
+今回変えるのは計算カーネルだけで、チェックポイントや`run.json`の形式は変えない。
+最後のチェックポイントより後の未保存分は再計算する。
+再開時に`causal_conv1d_fn`の参照実装へのフォールバック警告が出る場合は、
+カーネルが使われていないため、そのまま長時間学習を続けず環境を確認する。
+
 ## 保存先
 
 `--output`の下に毎回新しい`run-日時`を作り、開始時にパスを表示する。
