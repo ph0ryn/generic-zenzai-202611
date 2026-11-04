@@ -13,17 +13,17 @@ Colabで新規ノートブックを作る。
 バッチ32件・勾配累積1回を維持し、T4ではFP16で実行する。
 
 ```python
+from google.colab import drive
+
+drive.mount("/content/drive")
+```
+
+```python
 !git clone --recurse-submodules https://github.com/ph0ryn/generic-zenzai-202611.git
 %cd /content/generic-zenzai-202611
 %pip install uv==0.13.4
 !uv sync --locked
 !nvidia-smi
-```
-
-```python
-from google.colab import drive
-
-drive.mount("/content/drive")
 ```
 
 ```python
