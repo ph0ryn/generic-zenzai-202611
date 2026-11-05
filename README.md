@@ -11,6 +11,8 @@ Colabで新規ノートブックを作る。
 上から順に実行する。
 以下はLFM2.5-350M-Baseを135,000件・3周で全パラメータ学習する手順。
 バッチ32件・勾配累積1回を維持し、T4ではFP16で実行する。
+新規GPU学習ではfused AdamWを使う。再計算の削減と実測手順は
+[T4向けの実行設定](docs/training.md#t4向けの実行設定)を参照。
 
 ```python
 from google.colab import drive

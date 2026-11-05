@@ -336,7 +336,7 @@ class TrainingTest(unittest.TestCase):
                 self.assertEqual(error.exception.code, 2)
 
     def test_synthetic_models_train_with_accumulation_and_reload(self):
-        for model_id, config in (
+        for model_id, config, checkpointing, optimizer in (
             (
                 "Qwen/Qwen3-0.6B-Base",
                 Qwen3Config(
@@ -349,6 +349,8 @@ class TrainingTest(unittest.TestCase):
                     head_dim=16,
                     max_position_embeddings=512,
                 ),
+                True,
+                "adamw_torch",
             ),
             (
                 "LiquidAI/LFM2.5-350M-Base",
@@ -363,12 +365,18 @@ class TrainingTest(unittest.TestCase):
                     block_auto_adjust_ff_dim=False,
                     max_position_embeddings=512,
                 ),
+                False,
+                "adamw_torch_fused",
             ),
         ):
             with self.subTest(model=model_id):
-                self.check_prepared_model(config)
+                self.check_prepared_model(
+                    config, checkpointing=checkpointing, optimizer=optimizer
+                )
 
-    def check_prepared_model(self, config):
+    def check_prepared_model(
+        self, config, *, checkpointing=True, optimizer="adamw_torch"
+    ):
         from generic_zenzai_202611.inference import Converter
 
         with tempfile.TemporaryDirectory() as directory:
@@ -402,6 +410,9 @@ class TrainingTest(unittest.TestCase):
                 "2",
                 "--cpu",
             ]
+            if not checkpointing:
+                command.append("--no-gradient-checkpointing")
+            command.extend(["--optimizer", optimizer])
             env = {**os.environ, "HF_HUB_OFFLINE": "1", "OMP_NUM_THREADS": "1"}
             result = subprocess.run(
                 command,
@@ -424,6 +435,11 @@ class TrainingTest(unittest.TestCase):
             metrics = json.loads((saved.parent / "train_results.json").read_text())
             self.assertEqual(metrics["global_step"], 2)
             self.assertTrue(math.isfinite(metrics["train_loss"]))
+            self.assertEqual(metrics["optimizer"], optimizer)
+            self.assertEqual(metrics["gradient_checkpointing"], checkpointing)
+            training_args = torch.load(saved / "training_args.bin", weights_only=False)
+            self.assertEqual(training_args.gradient_checkpointing, checkpointing)
+            self.assertEqual(training_args.optim, optimizer)
             converter = Converter(saved, cpu=True, max_new_tokens=2)
             self.assertFalse(
                 torch.equal(before, converter.model.get_input_embeddings().weight)
@@ -469,6 +485,11 @@ class TrainingTest(unittest.TestCase):
             self.assertFalse(base.exists())
 
     def test_cli_trains_saves_reloads_and_resumes(self):
+        for optimizer in ("adamw_torch", "adamw_torch_fused"):
+            with self.subTest(optimizer=optimizer):
+                self.check_cli_lifecycle(optimizer)
+
+    def check_cli_lifecycle(self, optimizer):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             base = root / "base"
@@ -523,9 +544,10 @@ class TrainingTest(unittest.TestCase):
                 "--output",
                 str(output),
                 "--cpu",
-                "--save-steps",
-                "1",
             ]
+            if optimizer == "adamw_torch_fused":
+                command.extend(["--optimizer", optimizer])
+            command.extend(["--save-steps", "1"])
             env = {
                 **os.environ,
                 "HF_HUB_OFFLINE": "1",
@@ -584,6 +606,10 @@ class TrainingTest(unittest.TestCase):
             self.assertEqual(training_args.per_device_train_batch_size, 32)
             self.assertEqual(training_args.gradient_accumulation_steps, 1)
             self.assertEqual(training_args.save_steps, 1)
+            self.assertTrue(training_args.gradient_checkpointing)
+            self.assertEqual(training_args.optim, optimizer)
+            self.assertFalse(training_args.fp16)
+            self.assertFalse(training_args.bf16)
             self.assertEqual(
                 len((output / "train.jsonl").read_text(encoding="utf-8").splitlines()),
                 34,
@@ -592,6 +618,11 @@ class TrainingTest(unittest.TestCase):
             self.assertEqual(metrics["global_step"], 2)
             self.assertEqual(metrics["precision"], "fp32")
             self.assertEqual(metrics["effective_batch_size"], 32)
+            self.assertEqual(metrics["optimizer"], optimizer)
+            self.assertTrue(metrics["gradient_checkpointing"])
+            self.assertEqual(metrics["device_name"], "cpu")
+            self.assertNotIn("train_peak_memory_allocated", metrics)
+            self.assertNotIn("train_peak_memory_reserved", metrics)
             self.assertTrue(math.isfinite(metrics["train_loss"]))
             self.assertEqual(metrics["train_runtime_total"], metrics["train_runtime"])
             self.assertIn("累計学習時間:", result.stdout)
@@ -639,6 +670,27 @@ class TrainingTest(unittest.TestCase):
             )
             self.assertFalse((interrupted_run / "train_results.json").exists())
             self.assertEqual(exported_model.read_text(encoding="utf-8"), "")
+            saved_optimizer = torch.load(
+                interrupted_run / "checkpoint-1" / "optimizer.pt", weights_only=True
+            )
+            self.assertTrue(
+                all(
+                    bool(group["fused"]) == (optimizer == "adamw_torch_fused")
+                    for group in saved_optimizer["param_groups"]
+                )
+            )
+            other = "adamw_torch_fused" if optimizer == "adamw_torch" else "adamw_torch"
+            changed_optimizer = subprocess.run(
+                interrupted_command + ["--resume", "--optimizer", other],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=root,
+                timeout=120,
+            )
+            self.assertNotEqual(changed_optimizer.returncode, 0)
+            self.assertIn("元のoptimizerと異なる", changed_optimizer.stderr)
             changed_batch = subprocess.run(
                 interrupted_command
                 + ["--resume", "--batch-size", "16", "--gradient-accumulation", "2"],
@@ -698,7 +750,15 @@ class TrainingTest(unittest.TestCase):
             scores_path.parent.mkdir(parents=True)
             scores_path.write_text('{"accuracy_at1": 0.5}\n')
             resumed = subprocess.run(
-                interrupted_command + ["--resume", "--epochs", "2"],
+                interrupted_command
+                + [
+                    "--resume",
+                    "--epochs",
+                    "2",
+                    "--no-gradient-checkpointing",
+                    "--optimizer",
+                    "auto",
+                ],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -709,6 +769,13 @@ class TrainingTest(unittest.TestCase):
             self.assertEqual(resumed.returncode, 0, resumed.stdout + resumed.stderr)
             state = json.loads((interrupted_run / "train_results.json").read_text())
             self.assertEqual(state["global_step"], 4)
+            self.assertEqual(state["optimizer"], optimizer)
+            self.assertFalse(state["gradient_checkpointing"])
+            resumed_args = torch.load(
+                interrupted_run / "model" / "training_args.bin", weights_only=False
+            )
+            self.assertFalse(resumed_args.gradient_checkpointing)
+            self.assertEqual(resumed_args.optim, optimizer)
             self.assertEqual(
                 state["train_runtime_total"], 30.0 + state["train_runtime"]
             )

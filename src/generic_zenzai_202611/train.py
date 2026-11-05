@@ -55,6 +55,29 @@ def mixed_precision(cpu):
     return "bf16" if torch.cuda.is_bf16_supported(including_emulation=False) else "fp16"
 
 
+def optimizer_name(*, cpu, resume_from=None, requested="auto"):
+    if resume_from is None:
+        if requested != "auto":
+            return requested
+        return "adamw_torch" if cpu else "adamw_torch_fused"
+    # Loading replaces AdamW's parameter groups, but not its constructor's AMP
+    # handling. Preserve the saved mode instead of mixing fused AMP with old groups.
+    state = torch.load(
+        resume_from / "optimizer.pt", map_location="cpu", weights_only=True
+    )
+    modes = {bool(group.get("fused")) for group in state["param_groups"]}
+    if len(modes) != 1:
+        raise ValueError(
+            "再開用optimizerのfused設定が不整合です。再開元を確認してください。"
+        )
+    saved = "adamw_torch_fused" if modes.pop() else "adamw_torch"
+    if requested not in ("auto", saved):
+        raise ValueError(
+            "元のoptimizerと異なるため再開できません。--optimizer autoを指定してください。"
+        )
+    return saved
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="文脈付きかな漢字変換を全パラメータ学習する"
@@ -77,6 +100,18 @@ def main():
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--gradient-accumulation", type=int, default=1)
     parser.add_argument("--save-steps", type=int, default=1000)
+    parser.add_argument(
+        "--optimizer",
+        choices=("auto", "adamw_torch", "adamw_torch_fused"),
+        default="auto",
+        help="optimizerの実装（auto: 新規CUDAはfused、再開時は保存済みの方式）",
+    )
+    parser.add_argument(
+        "--gradient-checkpointing",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="勾配チェックポイントでGPUメモリを節約する（既定: 有効）",
+    )
     resuming = parser.add_mutually_exclusive_group()
     resuming.add_argument("--resume", action="store_true", help="最新runから再開")
     resuming.add_argument(
@@ -150,6 +185,12 @@ def main():
                 "元の実行とモデル・データ・学習設定が異なるため再開できません。"
             )
 
+    try:
+        optimizer = optimizer_name(
+            cpu=args.cpu, resume_from=args.resume_from, requested=args.optimizer
+        )
+    except (OSError, ValueError) as error:
+        parser.error(f"再開用optimizerを読み込めません: {error}")
     model = AutoModelForCausalLM.from_pretrained(
         model_source,
         local_files_only=True,
@@ -173,8 +214,8 @@ def main():
             bf16=precision == "bf16",
             fp16=precision == "fp16",
             use_cpu=args.cpu,
-            gradient_checkpointing=True,
-            optim="adamw_torch",
+            gradient_checkpointing=args.gradient_checkpointing,
+            optim=optimizer,
             warmup_steps=0.05,
             logging_steps=10,
             logging_first_step=True,
@@ -205,9 +246,29 @@ def main():
         flush=True,
     )
     print(f"計算精度: {precision}", flush=True)
+    print(
+        f"実行設定: optimizer={optimizer} | 勾配チェックポイント: "
+        f"{'有効' if args.gradient_checkpointing else '無効'}",
+        flush=True,
+    )
+    device_name = "cpu" if args.cpu else torch.cuda.get_device_name(trainer.args.device)
+    if not args.cpu:
+        torch.cuda.reset_peak_memory_stats(trainer.args.device)
     result = trainer.train(
         resume_from_checkpoint=str(args.resume_from) if args.resume_from else None
     )
+    if not args.cpu:
+        allocated = torch.cuda.max_memory_allocated(trainer.args.device)
+        reserved = torch.cuda.max_memory_reserved(trainer.args.device)
+        result.metrics.update(
+            train_peak_memory_allocated=allocated,
+            train_peak_memory_reserved=reserved,
+        )
+        print(
+            f"GPUメモリピーク: allocated={allocated / 1024**3:.2f} GiB | "
+            f"reserved={reserved / 1024**3:.2f} GiB",
+            flush=True,
+        )
     # Restoring callback state replaces the original instance inside Trainer.
     timing = trainer.pop_callback(TrainingTimeCallback)
     result.metrics["train_runtime_total"] = (
@@ -223,6 +284,9 @@ def main():
         global_step=trainer.state.global_step,
         precision=precision,
         effective_batch_size=effective_batch_size,
+        optimizer=optimizer,
+        gradient_checkpointing=args.gradient_checkpointing,
+        device_name=device_name,
     )
     trainer.save_metrics("train", result.metrics)
     model_path.write_text(

@@ -23,6 +23,8 @@ JSONの破損やその他の入力検証エラーは除外せずに停止する�
 | バッチ | 32件 × 勾配累積1回（累積なし）。実効32件 |
 | 長さ上限 | 入力・正解・終了記号を合わせて512トークン。超過時は切らずに停止 |
 | 計算精度 | bf16ハードウェア対応GPUではbf16、それ以外のCUDA GPUではfp16 |
+| optimizer | 新規CUDA学習はfused AdamW、CPUは通常のAdamW。再開時は保存済みの方式を維持 |
+| 勾配チェックポイント | 有効。`--no-gradient-checkpointing`で再計算を省く代わりにGPUメモリ使用量が増える |
 | チェックポイント | 1,000更新ごと（`--save-steps`で変更）。学習中は最新1個を保持し、正常完了後に削除 |
 
 バッチ件数は`--batch-size`、勾配累積は`--gradient-accumulation`で変更できる。
@@ -49,6 +51,82 @@ JSONの破損やその他の入力検証エラーは除外せずに停止する�
 モデルの出典は[LFM2.5のモデルカード](https://huggingface.co/LiquidAI/LFM2.5-350M-Base)、
 学習データの出典・ライセンス・品質上の制限は[以下の説明](#学習データの出典と制限)を参照。
 その他のCLIオプションは`uv run --locked train --help`で確認できる。
+
+## T4向けの実行設定
+
+新規CUDA学習では`adamw_torch_fused`を使う。同じAdamW更新をまとめて実行し、
+optimizerのカーネル起動や中間メモリの負担を減らすための変更である。
+モデルの保存パラメータはfloat32のまま、T4の演算にはFP16とGradScalerを使う。
+学習データ・正解部分のマスク・実効バッチ32件・学習率・更新回数は変えない。
+実際のT4での高速化率とCCU削減量は未計測。
+
+`--optimizer adamw_torch`で従来の実装、`--optimizer adamw_torch_fused`でfusedを指定できる。
+既定の`--optimizer auto`は新規CUDA学習ならfused、CPUなら通常のAdamWを選ぶ。
+再開時は`optimizer.pt`に保存された方式を読み取り、その方式を維持する。
+旧runを自動でfusedに変換したり、optimizerの状態を初期化したりはしない。
+再開元と異なる方式を明示するとエラーになる。方式を比較するときは新規runを使う。
+
+勾配チェックポイントは、活性値の保持を減らす代わりに計算をやり直す仕組みである。
+`--no-gradient-checkpointing`を付けると再計算を省けるが、GPUメモリ使用量は増える。
+バッチ32件のままT4に収まるかは未計測のため、既定では有効のままとする。
+短い試走が成功しても、後半の長いバッチや上限512トークンで収まる保証はない。
+メモリ不足時にバッチや精度を自動変更することはない。
+保存済みチェックポイントがあれば、勾配チェックポイントを有効に戻して再開できる。
+
+### 短い比較実行
+
+[Colabの環境・データ・モデルの準備](../README.md#usage)後、同じT4ランタイムで次を実行する。
+各条件で同じ135,000件から同じ順序の約211更新を行い、途中の定期保存が発生しないよう保存間隔を大きくする。
+どの条件も元モデルから始める。通常の3周学習やAJIMEE評価は、この速度比較には不要。
+実際の学習件数が異なる場合は、両ソースの件数を全条件で同じ値に変更する。
+
+```sh
+%%bash
+set -euo pipefail
+for variant in baseline fused no-recompute; do
+    optimizer=adamw_torch_fused
+    checkpointing=--gradient-checkpointing
+    case "$variant" in
+        baseline) optimizer=adamw_torch ;;
+        no-recompute) checkpointing=--no-gradient-checkpointing ;;
+    esac
+    time uv run --locked train \
+        --wikipedia-count 67500 \
+        --corpus-count 67500 \
+        --epochs 0.05 \
+        --batch-size 32 \
+        --gradient-accumulation 1 \
+        --save-steps 1000000 \
+        --optimizer "$optimizer" \
+        "$checkpointing" \
+        --output "/content/t4-benchmark-$variant"
+done
+```
+
+- `baseline`: 従来のAdamW＋勾配チェックポイント有効。
+- `fused`: fused AdamW＋勾配チェックポイント有効。新規GPU学習の既定値。
+- `no-recompute`: fused AdamW＋勾配チェックポイント無効。メモリが足りる場合の候補。
+
+比較には各runの`train_results.json`にある`train_runtime`、`train_steps_per_second`、
+`train_peak_memory_allocated`、`train_peak_memory_reserved`を使う。
+メモリ値はバイト単位で、optimizer初回更新を含む今回の学習区間のPyTorch allocatorのピーク。
+CUDAコンテキストや拡張がPyTorch外で確保した分を含むGPU全体の使用量ではない。
+`device_name`、`optimizer`、`gradient_checkpointing`も保存する。
+optimizerと勾配チェックポイントの設定は最終モデルの`training_args.bin`にも残る。
+
+保存間隔を大きくしても、Transformersは学習終端でチェックポイントを保存する。
+この保存時間は`train_runtime`と`train_steps_per_second`に含まれる。
+純粋な計算カーネルの速度ではなく、終端保存を含む短い試走の比較として扱う。
+学習完了後の最終モデル保存は`train_runtime`に含まれない。
+同じT4・同じ更新数なら、学習区間のCCUは`CCU/時 × train_runtime / 3600`で比較できる。
+`time`の`real`にはデータ準備・最終保存も含まれるため、全体の所要時間も併せて見る。
+初期ウォームアップを含む短い試走なので、差が小さければ実行順を変えて再確認する。
+再開前後を混ぜた`train_runtime_total`は、この比較には使わない。
+エラーが出た場合はそこで停止し、原因を確認する。
+
+比較用モデルはColabの一時ディスクに保存する。速度確認用であり、性能評価用のモデルではない。
+比較実行で`model-path.txt`も更新されるため、終了後は通常の学習セルで本学習を開始し、
+その学習が完了してから評価セルを実行する。
 
 ## 高速畳み込みカーネル
 
